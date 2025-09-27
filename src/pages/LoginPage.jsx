@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
@@ -7,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { useAuth } from '../contexts/AuthContext'
 
 export default function LoginPage() {
+  const navigate = useNavigate()
   const [mode, setMode] = useState('login') // 'login' or 'signup'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -15,7 +17,14 @@ export default function LoginPage() {
   const [lastName, setLastName] = useState('')
   const [errors, setErrors] = useState({})
   const [success, setSuccess] = useState('')
-  const { login, signup, isLoading } = useAuth()
+  const { login, signup, isLoading, isAuthenticated } = useAuth()
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/messages', { replace: true })
+    }
+  }, [isAuthenticated, navigate])
 
   const validateForm = () => {
     const newErrors = {}
@@ -68,9 +77,11 @@ export default function LoginPage() {
 
     if (mode === 'login') {
       const result = await login(email, password)
-      
+
       if (!result.success) {
         setErrors({ submit: result.error })
+      } else {
+        // Navigation will happen via useEffect when isAuthenticated updates
       }
     } else {
       const result = await signup({

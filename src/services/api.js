@@ -48,12 +48,22 @@ class ApiService {
   }
 
   async handleResponse(response) {
-    const data = await response.json();
-    
+    // Try to parse as JSON, but handle plain text responses
+    let data;
+    const contentType = response.headers.get("content-type");
+
+    if (contentType && contentType.includes("application/json")) {
+      data = await response.json();
+    } else {
+      // Handle plain text responses (like rate limiting messages)
+      const text = await response.text();
+      data = { error: text || `HTTP error! status: ${response.status}` };
+    }
+
     if (!response.ok) {
       throw new Error(data.error || `HTTP error! status: ${response.status}`);
     }
-    
+
     return data;
   }
 

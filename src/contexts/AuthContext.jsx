@@ -46,7 +46,6 @@ export const AuthProvider = ({ children }) => {
       const response = await apiService.login(email, password);
       setUser(response.user);
       setIsAuthenticated(true);
-      showSuccess(`Welcome back, ${response.user.firstName}!`);
       return { success: true };
     } catch (error) {
       showError(error.message || 'Login failed');
@@ -64,7 +63,6 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setUser(null);
       setIsAuthenticated(false);
-      showSuccess('Logged out successfully');
     }
   };
 
