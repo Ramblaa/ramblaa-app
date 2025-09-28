@@ -147,7 +147,7 @@ router.get('/:id', async (req, res) => {
         f.*,
         fc.name as category_name,
         fc.color as category_color,
-        p.name as property_name,
+        p.property_title as property_name,
         u1.email as created_by_email,
         u2.email as updated_by_email,
         ARRAY_AGG(
@@ -163,7 +163,7 @@ router.get('/:id', async (req, res) => {
       LEFT JOIN faq_tag_relationships ftr ON f.id = ftr.faq_id
       LEFT JOIN faq_tags ft ON ftr.tag_id = ft.id
       WHERE f.id = $1 AND f.is_active = true
-      GROUP BY f.id, fc.name, fc.color, p.name, u1.email, u2.email
+      GROUP BY f.id, fc.name, fc.color, p.property_title, u1.email, u2.email
     `;
 
     const result = await pool.query(query, [id]);
@@ -324,7 +324,7 @@ router.put('/:id', faqValidation, async (req, res) => {
         f.*,
         fc.name as category_name,
         fc.color as category_color,
-        p.name as property_name,
+        p.property_title as property_name,
         ARRAY_AGG(
           CASE WHEN ft.name IS NOT NULL 
           THEN json_build_object('id', ft.id, 'name', ft.name)
@@ -336,7 +336,7 @@ router.put('/:id', faqValidation, async (req, res) => {
       LEFT JOIN faq_tag_relationships ftr ON f.id = ftr.faq_id
       LEFT JOIN faq_tags ft ON ftr.tag_id = ft.id
       WHERE f.id = $1
-      GROUP BY f.id, fc.name, fc.color, p.name
+      GROUP BY f.id, fc.name, fc.color, p.property_title
     `;
 
     const completeResult = await client.query(completeQuery, [id]);

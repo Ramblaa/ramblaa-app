@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  Phone, MessageCircle, Send, ArrowLeft, Bot, BotOff, User, CheckSquare, 
-  ExternalLink, Search, Calendar, Clock, MapPin, Plus, Wrench, Brush, 
-  Package, Check, Trash2, PlayCircle, ChevronDown, MessageSquarePlus
+import {
+  Phone, MessageCircle, Send, ArrowLeft, Bot, BotOff, User, CheckSquare,
+  ExternalLink, Search, Calendar, Clock, MapPin, Plus, Wrench, Brush,
+  Package, Check, Trash2, PlayCircle, ChevronDown, MessageSquarePlus,
+  Loader2, Brain, Settings
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
@@ -12,44 +13,37 @@ import { Badge } from '../components/ui/badge'
 import { Switch } from '../components/ui/switch'
 import { cn } from '../lib/utils'
 import { useNavigate } from 'react-router-dom'
+import ScenarioSetupModal from '../components/ScenarioSetupModal'
+import apiService from '../services/api'
 
-// Demo data for messages
-const demoConversations = [
-  {
-    id: 1,
-    guestName: 'Alex Demo',
-    phone: '+1 (555) 000-0001',
-    lastMessage: 'This looks great! The auto-responses work perfectly.',
-    timestamp: '2 minutes ago',
-    unread: 1,
-    property: 'Demo Villa',
-    autoResponseEnabled: true,
-    messages: [
-      { id: 1, text: 'Hi! I\'m testing the sandbox mode. How does the auto-response work?', sender: 'guest', timestamp: '2:30 PM' },
-      { id: 2, text: 'Hello Alex! Welcome to the demo. Auto-responses are powered by Rambley AI and can handle common guest inquiries automatically.', sender: 'host', senderType: 'rambley', timestamp: '2:31 PM' },
-      { id: 3, text: 'Can you create a task for me?', sender: 'guest', timestamp: '2:35 PM', generatedTasks: [1] },
-      { id: 4, text: 'I\'ve created a demo task for you! You can see it in the tasks section below.', sender: 'host', senderType: 'rambley', timestamp: '2:36 PM' },
-      { id: 5, text: 'This looks great! The auto-responses work perfectly.', sender: 'guest', timestamp: '2:40 PM' },
-    ]
-  },
-  {
-    id: 2,
-    guestName: 'Sarah Test',
-    phone: '+1 (555) 000-0002',
-    lastMessage: 'Perfect! I can see how the system works now.',
-    timestamp: '10 minutes ago',
-    unread: 0,
-    property: 'Demo House',
-    autoResponseEnabled: false,
-    messages: [
-      { id: 1, text: 'I\'m exploring the demo features. This is impressive!', sender: 'guest', timestamp: '2:20 PM' },
-      { id: 2, text: 'Thank you! Feel free to test all the features. This is a safe sandbox environment.', sender: 'host', senderType: 'host', timestamp: '2:22 PM' },
-      { id: 3, text: 'How do I turn on auto-responses?', sender: 'guest', timestamp: '2:25 PM' },
-      { id: 4, text: 'Just click the bot toggle in the top right when viewing a conversation!', sender: 'host', senderType: 'host', timestamp: '2:26 PM' },
-      { id: 5, text: 'Perfect! I can see how the system works now.', sender: 'guest', timestamp: '2:28 PM' },
-    ]
-  },
-]
+// Transform backend message to UI format
+const transformMessage = (dbMessage) => ({
+  id: dbMessage.id || dbMessage.message_uuid,
+  text: dbMessage.message_body || '',
+  sender: dbMessage.message_type === 'Inbound' ? 'guest' : 'host',
+  senderType: dbMessage.requestor_role === 'ai' ? 'rambley' :
+              dbMessage.requestor_role === 'staff' ? 'staff' : 'host',
+  timestamp: new Date(dbMessage.timestamp).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+});
+
+// Transform backend task to UI format
+const transformTask = (dbTask) => ({
+  id: dbTask.id,
+  title: dbTask.title,
+  type: dbTask.task_type,
+  property: dbTask.property_id,
+  assignee: dbTask.assignee_name,
+  dueDate: dbTask.due_date,
+  dueTime: dbTask.due_time,
+  status: dbTask.status,
+  priority: dbTask.priority,
+  description: dbTask.description,
+  threadCount: 1, // For now
+  conversations: [] // Will populate if needed
+});
 
 // Demo data for tasks
 const demoTasks = [
@@ -208,25 +202,27 @@ const personas = [
 ]
 
 // Helper to get relevant personas for a conversation
-function getRelevantPersonas(conversation, hostName = 'Harrison Budd') {
+function getRelevantPersonas(conversation, currentSession, hostName = 'Harrison Budd') {
   const personas = []
-  if (!conversation) return personas
+  if (!conversation || !currentSession) return personas
 
-  // Always add Guest if guestName exists
-  if (conversation.guestName) {
-    personas.push({
-      id: 'guest',
-      label: `Guest (${conversation.guestName})`,
-      description: 'Respond as the guest',
-      icon: User,
-      color: 'bg-blue-100 text-blue-600',
-      sender: 'guest',
-      name: conversation.guestName
-    })
-  }
+  // Always add Guest - use conversation's guest name or fallback to session guest name
+  const guestName = conversation.guestName || conversation.scenario?.guest_name || currentSession.scenario_data?.guest_name || 'Guest';
+  personas.push({
+    id: 'guest',
+    type: 'guest',
+    label: `Guest (${guestName})`,
+    description: 'Respond as the guest',
+    icon: User,
+    color: 'bg-blue-100 text-blue-600',
+    sender: 'guest',
+    name: guestName
+  })
+
   // Always add Host
   personas.push({
     id: 'host',
+    type: 'host',
     label: `Host (${hostName})`,
     description: 'Manual host response',
     icon: User,
@@ -235,49 +231,43 @@ function getRelevantPersonas(conversation, hostName = 'Harrison Budd') {
     senderType: 'host',
     name: hostName
   })
-  // Add Staff if a staff/assignee is present in the context (simulate for demo)
-  // We'll check if any message has senderType 'staff' or if the conversation has a staffName property
-  let staffName = null
-  if (conversation.staffName) {
-    staffName = conversation.staffName
-  } else {
-    const staffMsg = conversation.messages.find(m => m.senderType === 'staff')
-    if (staffMsg && staffMsg.name) staffName = staffMsg.name
-    else if (staffMsg) staffName = 'Staff Member'
-  }
-  if (staffName) {
-    personas.push({
-      id: 'staff',
-      label: `Staff (${staffName})`,
-      description: 'Cleaning/maintenance staff',
-      icon: Wrench,
-      color: 'bg-orange-100 text-orange-600',
-      sender: 'host',
-      senderType: 'staff',
-      name: staffName
-    })
-  }
+
+  // Add Staff (always available for demo purposes)
+  personas.push({
+    id: 'staff',
+    type: 'staff',
+    label: 'Staff Member',
+    description: 'Cleaning/maintenance staff',
+    icon: Wrench,
+    color: 'bg-orange-100 text-orange-600',
+    sender: 'staff',
+    senderType: 'staff',
+    name: 'Staff Member'
+  })
+
   return personas
 }
 
 export default function SandboxPage() {
   const navigate = useNavigate()
   const hostName = 'Harrison Budd'
-  
+
+  // Core state
+  const [loading, setLoading] = useState(false)
+  const [sessions, setSessions] = useState([])
+  const [currentSession, setCurrentSession] = useState(null)
+  const [showSetupModal, setShowSetupModal] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+
   // Messages state
   const [selectedConversation, setSelectedConversation] = useState(null)
-  const [conversations, setConversations] = useState(demoConversations)
+  const [conversations, setConversations] = useState([])
   const [newMessage, setNewMessage] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedPersona, setSelectedPersona] = useState(null)
   const [showPersonaDropdown, setShowPersonaDropdown] = useState(false)
-  const [conversationStates, setConversationStates] = useState(
-    demoConversations.reduce((acc, conv) => {
-      acc[conv.id] = { autoResponseEnabled: conv.autoResponseEnabled }
-      return acc
-    }, {})
-  )
-  
+  const [conversationStates, setConversationStates] = useState({})
+
   // Tasks state
   const [taskFilter, setTaskFilter] = useState('all')
   const [taskPropertyFilter, setTaskPropertyFilter] = useState('all')
@@ -285,7 +275,8 @@ export default function SandboxPage() {
   const [selectedTask, setSelectedTask] = useState(null)
   const [selectedTaskConversation, setSelectedTaskConversation] = useState(null)
   const [taskConversationStates, setTaskConversationStates] = useState({})
-  
+  const [tasks, setTasks] = useState([])
+
   // Demo state
   const [demoMode, setDemoMode] = useState('messages') // 'messages' or 'tasks'
 
@@ -491,9 +482,9 @@ export default function SandboxPage() {
         </div>
         <div className="space-y-1">
           {generatedTasks.map(taskId => {
-            const task = demoTasks.find(t => t.id === taskId)
+            const task = tasks.find(t => t.id === taskId)
             if (!task) return null
-            
+
             return (
               <button
                 key={taskId}
@@ -531,13 +522,209 @@ export default function SandboxPage() {
 
   const counts = getTaskCounts(taskPropertyFilter)
 
+  // Load initial data
+  useEffect(() => {
+    loadSessions();
+  }, []);
+
+  // Load session data when current session changes
+  useEffect(() => {
+    if (currentSession) {
+      loadSessionData(currentSession.id);
+    }
+  }, [currentSession]);
+
+  // Data loading functions
+  const loadSessions = async () => {
+    try {
+      setLoading(true);
+      const response = await apiService.getSandboxSessions();
+      setSessions(response.data);
+
+      // Auto-select the most recent session if available
+      if (response.data.length > 0 && !currentSession) {
+        setCurrentSession(response.data[0]);
+      }
+    } catch (error) {
+      console.error('Error loading sessions:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadConversations = async () => {
+    try {
+      console.log('[SandboxPage] Loading conversations...');
+      const response = await apiService.getSandboxSessions();
+      const sessions = response.data || [];
+      console.log('[SandboxPage] Received sessions:', sessions.length);
+
+      // Transform sessions to conversation format
+      const transformedConversations = sessions.map(session => ({
+        id: session.id,
+        guestName: session.scenario_data?.guest_name || 'Unknown Guest',
+        phone: session.scenario_data?.guest_phone || 'No phone',
+        property: session.property_name || 'Unknown Property',
+        lastMessage: session.message_count > 0 ? 'Last message...' : 'No messages yet',
+        timestamp: new Date(session.updated_at || session.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+        unread: 0,
+        autoResponseEnabled: true,
+        messages: [],
+        isActive: session.is_active,
+        scenario: session.scenario_data
+      }));
+
+      console.log('[SandboxPage] Setting conversations:', transformedConversations.length);
+      setConversations(transformedConversations);
+    } catch (error) {
+      console.error('Failed to load conversations:', error);
+    }
+  };
+
+  const loadConversationMessages = async (conversation) => {
+    try {
+      console.log('[SandboxPage] Loading messages for conversation:', conversation.id);
+      const response = await apiService.getSandboxSession(conversation.id);
+      const sessionData = response.data;
+
+      // Transform messages
+      const transformedMessages = sessionData.messages.map(transformMessage);
+
+      // Update the conversation with loaded messages
+      const updatedConversation = {
+        ...conversation,
+        messages: transformedMessages
+      };
+
+      setSelectedConversation(updatedConversation);
+    } catch (error) {
+      console.error('Failed to load conversation messages:', error);
+      // Still set the conversation even if messages fail to load
+      setSelectedConversation(conversation);
+    }
+  };
+
+  const loadSessionData = async (sessionId) => {
+    try {
+      setLoading(true);
+      const response = await apiService.getSandboxSession(sessionId);
+      const sessionData = response.data;
+
+      // Transform messages to conversations format
+      const guestName = sessionData.session.scenario_data.guest_name;
+      const guestPhone = sessionData.session.scenario_data.guest_phone || '+1234567890';
+      const propertyName = sessionData.session.property.name;
+
+      if (sessionData.messages.length > 0) {
+        const conversation = {
+          id: sessionId,
+          guestName,
+          phone: guestPhone,
+          property: propertyName,
+          lastMessage: sessionData.messages[sessionData.messages.length - 1]?.message_body || '',
+          timestamp: 'Active session',
+          unread: 0,
+          autoResponseEnabled: true,
+          messages: sessionData.messages.map(transformMessage)
+        };
+
+        // Only set conversations if not in messages mode (messages mode manages its own conversations list)
+        if (demoMode !== 'messages') {
+          setConversations([conversation]);
+        }
+        setSelectedConversation(conversation);
+      } else {
+        // Only clear conversations if not in messages mode
+        if (demoMode !== 'messages') {
+          setConversations([]);
+        }
+        setSelectedConversation(null);
+      }
+
+      // Transform tasks
+      setTasks(sessionData.tasks.map(transformTask));
+
+    } catch (error) {
+      console.error('Error loading session data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateSession = async (sessionData) => {
+    try {
+      const response = await apiService.createSandboxSession(sessionData);
+      await loadSessions();
+
+      // Select the new session
+      const newSession = sessions.find(s => s.id === response.data.session_id) || {
+        id: response.data.session_id,
+        session_name: response.data.session_name,
+        scenario_data: response.data.scenario,
+        property_name: response.data.property.name
+      };
+      setCurrentSession(newSession);
+
+    } catch (error) {
+      console.error('Error creating session:', error);
+      throw error;
+    }
+  };
+
+  const handleProcessSession = async () => {
+    if (!currentSession) return;
+
+    try {
+      setIsProcessing(true);
+      await apiService.processSandboxSession(currentSession.id);
+
+      // Reload session data to get AI responses
+      await loadSessionData(currentSession.id);
+
+    } catch (error) {
+      console.error('Error processing session:', error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // When conversation changes, update persona options and default
   useEffect(() => {
-    if (selectedConversation) {
-      const personas = getRelevantPersonas(selectedConversation, hostName)
+    if (selectedConversation && currentSession) {
+      const personas = getRelevantPersonas(selectedConversation, currentSession, hostName)
       setSelectedPersona(personas[0] || null)
     }
-  }, [selectedConversation])
+  }, [selectedConversation, currentSession])
+
+  // Close persona dropdown when clicking outside
+  useEffect(() => {
+    if (!showPersonaDropdown) return;
+
+    const handleClickOutside = (event) => {
+      if (!event.target.closest('.persona-dropdown')) {
+        setShowPersonaDropdown(false);
+      }
+    };
+
+    // Use a small delay to avoid immediate closure
+    const timeoutId = setTimeout(() => {
+      document.addEventListener('click', handleClickOutside);
+    }, 0);
+
+    return () => {
+      clearTimeout(timeoutId);
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [showPersonaDropdown]);
+
+  // Load conversations when switching to messages mode
+  useEffect(() => {
+    console.log('[SandboxPage] useEffect triggered, demoMode:', demoMode);
+    if (demoMode === 'messages') {
+      console.log('[SandboxPage] Loading conversations due to messages mode');
+      loadConversations();
+    }
+  }, [demoMode]);
 
   return (
     <div className="h-full flex flex-col">
@@ -556,6 +743,7 @@ export default function SandboxPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+
             <div className="flex bg-brand-light rounded-lg p-1">
               <Button
                 variant={demoMode === 'messages' ? 'default' : 'ghost'}
@@ -576,14 +764,16 @@ export default function SandboxPage() {
                 Tasks
               </Button>
             </div>
+
+
             <Button
               variant="outline"
               size="sm"
-              onClick={startNewChat}
+              onClick={() => setShowSetupModal(true)}
               className="text-sm"
             >
-              <MessageSquarePlus className="mr-2 h-4 w-4" />
-              New Chat
+              <Plus className="mr-2 h-4 w-4" />
+              New Scenario
             </Button>
           </div>
         </div>
@@ -940,13 +1130,13 @@ export default function SandboxPage() {
             >
               {/* Messages List - Identical to MessagesPage */}
               <div className={cn(
-                "w-full lg:w-96 border-r bg-background",
+                "w-full lg:w-96 border-r bg-background flex flex-col h-full",
                 selectedConversation ? "hidden lg:block" : "block"
               )}>
-                <div className="p-6 border-b">
+                <div className="p-6 border-b flex-shrink-0">
                   <h1 className="text-2xl font-bold text-brand-dark">Messages</h1>
                   <p className="text-brand-mid-gray">Guest conversations</p>
-                  
+
                   {/* Search Input */}
                   <div className="mt-4 relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-brand-mid-gray" />
@@ -958,8 +1148,15 @@ export default function SandboxPage() {
                     />
                   </div>
                 </div>
-                
-                <div className="overflow-y-auto">
+
+                <div
+                  className="flex-1"
+                  style={{
+                    height: 'calc(100vh - 200px)',
+                    overflowY: 'scroll',
+                    WebkitOverflowScrolling: 'touch'
+                  }}
+                >
                   {filteredConversations.length > 0 ? (
                     filteredConversations.map((conversation) => (
                       <motion.div
@@ -969,7 +1166,7 @@ export default function SandboxPage() {
                           "p-4 border-b cursor-pointer transition-colors",
                           selectedConversation?.id === conversation.id ? "bg-brand-purple/10 border-brand-purple/20" : ""
                         )}
-                        onClick={() => setSelectedConversation(conversation)}
+                        onClick={() => loadConversationMessages(conversation)}
                       >
                         <div className="flex items-start gap-3">
                           <div className="w-10 h-10 bg-brand-vanilla text-brand-dark rounded-full flex items-center justify-center font-medium text-sm">
@@ -1151,7 +1348,7 @@ export default function SandboxPage() {
                             <span className="font-medium">Choose your persona:</span>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            {personas.map((persona) => (
+                            {getRelevantPersonas(selectedConversation, currentSession, hostName).map((persona) => (
                               <Button
                                 key={persona.id}
                                 variant="outline"
@@ -1173,6 +1370,46 @@ export default function SandboxPage() {
                           placeholder={`Type message as ${selectedPersona ? selectedPersona.label : ''}...`}
                           className="flex-1"
                         />
+
+                        {/* Persona Switcher */}
+                        {selectedPersona && (
+                          <div className="relative persona-dropdown">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setShowPersonaDropdown(!showPersonaDropdown)}
+                              className="flex items-center gap-2 px-3 py-2 h-10"
+                            >
+                              <selectedPersona.icon className="h-4 w-4" />
+                              <span className="text-sm">{selectedPersona.label}</span>
+                              <ChevronDown className="h-3 w-3" />
+                            </Button>
+
+                            {/* Dropdown Menu */}
+                            {showPersonaDropdown && (
+                              <div className="absolute bottom-full right-0 mb-2 bg-white border border-gray-200 rounded-md shadow-lg z-50 min-w-[120px]">
+                                {getRelevantPersonas(selectedConversation, currentSession, hostName).map((persona) => (
+                                  <button
+                                    key={persona.type}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedPersona(persona);
+                                      setShowPersonaDropdown(false);
+                                    }}
+                                    className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 transition-colors ${
+                                      selectedPersona.type === persona.type ? 'bg-brand-purple/10 text-brand-purple' : 'text-gray-700'
+                                    }`}
+                                  >
+                                    <persona.icon className="h-4 w-4" />
+                                    <span>{persona.label}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         <Button type="submit" size="icon" disabled={!newMessage.trim() || !selectedPersona}>
                           <Send className="h-4 w-4" />
                         </Button>
@@ -1216,8 +1453,8 @@ export default function SandboxPage() {
                 {/* Status Filters */}
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { key: 'all', label: 'All Tasks', count: demoTasks.length },
-                    { key: 'upcoming', label: 'Upcoming', count: demoTasks.filter(t => t.status !== 'completed').length },
+                    { key: 'all', label: 'All Tasks', count: tasks.length },
+                    { key: 'upcoming', label: 'Upcoming', count: tasks.filter(t => t.status !== 'completed').length },
                     { key: 'pending', label: 'Pending', count: counts.pending },
                     { key: 'in-progress', label: 'In Progress', count: counts.inProgress },
                     { key: 'completed', label: 'Completed', count: counts.completed }
@@ -1378,6 +1615,13 @@ export default function SandboxPage() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Scenario Setup Modal */}
+      <ScenarioSetupModal
+        isOpen={showSetupModal}
+        onClose={() => setShowSetupModal(false)}
+        onCreateSession={handleCreateSession}
+      />
     </div>
   )
 } 

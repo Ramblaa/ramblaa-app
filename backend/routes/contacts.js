@@ -460,8 +460,8 @@ router.get('/by-property/:propertyId', async (req, res) => {
         json_build_array(
           json_build_object(
             'id', p.id,
-            'name', p.name,
-            'address', p.address
+            'name', p.property_title,
+            'address', p.property_location
           )
         ) as service_locations
       FROM staff s

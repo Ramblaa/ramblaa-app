@@ -14,6 +14,7 @@ import messagesRoutes from './routes/messages.js';
 import taskLogRoutes from './routes/task-log.js';
 import aiLogRoutes from './routes/ai-log.js';
 import webhookRoutes from './routes/webhook.js';
+import sandboxRoutes from './routes/sandbox.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { authenticateToken } from './middleware/auth.js';
 
@@ -49,7 +50,7 @@ app.use(limiter);
 // Stricter rate limiting for auth endpoints
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 50, // limit each IP to 50 requests per windowMs for auth
+  max: 200, // limit each IP to 200 requests per windowMs for auth (increased for development)
   message: 'Too many authentication attempts, please try again later.'
 });
 
@@ -80,6 +81,7 @@ app.use('/api/faqs', faqRoutes);
 app.use('/api/messages', messagesRoutes);
 app.use('/api/task-log', taskLogRoutes);
 app.use('/api/ai-log', aiLogRoutes);
+app.use('/api/sandbox', sandboxRoutes);
 app.use('/api/webhook', webhookLimiter, webhookRoutes);
 
 // Error handling

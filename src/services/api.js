@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 class ApiService {
   constructor() {
@@ -366,6 +366,51 @@ class ApiService {
     
     const queryString = searchParams.toString();
     return this.request(`/messages/${conversationId}${queryString ? '?' + queryString : ''}`);
+  }
+
+  // Sandbox methods
+  async getSandboxSessions(activeOnly = true) {
+    return this.request(`/sandbox/sessions?active_only=${activeOnly}`);
+  }
+
+  async getSandboxSession(sessionId) {
+    return this.request(`/sandbox/session/${sessionId}`);
+  }
+
+  async createSandboxSession(sessionData) {
+    return this.request('/sandbox/initialize', {
+      method: 'POST',
+      body: JSON.stringify(sessionData),
+    });
+  }
+
+  async sendSandboxMessage(sessionId, message, senderType, senderName) {
+    return this.request('/sandbox/message', {
+      method: 'POST',
+      body: JSON.stringify({
+        session_id: sessionId,
+        message: message,
+        sender_type: senderType,
+        sender_name: senderName
+      }),
+    });
+  }
+
+  async processSandboxSession(sessionId) {
+    return this.request('/sandbox/process', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  }
+
+  async deleteSandboxSession(sessionId) {
+    return this.request(`/sandbox/session/${sessionId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getSandboxProperties() {
+    return this.request('/sandbox/properties');
   }
 
   // Check if user is authenticated
