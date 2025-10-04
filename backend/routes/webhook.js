@@ -276,7 +276,7 @@ async function handleMessageLog(req, res) {
 router.get('/status', authenticateApiKey, (req, res) => {
   res.json({ 
     status: 'ok', 
-    service: 'Rambley Webhook API',
+    service: 'Ramble Webhook API',
     timestamp: new Date().toISOString() 
   });
 });

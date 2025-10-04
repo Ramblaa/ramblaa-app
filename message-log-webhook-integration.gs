@@ -1,18 +1,18 @@
 /**
- * Google Apps Script integration for sending d:messageLog data to Rambley webhook
+ * Google Apps Script integration for sending d:messageLog data to Ramble webhook
  * 
  * ADD THIS TO YOUR EXISTING guestResponse.gs script - don't replace it!
  * 
  * Setup Instructions:
  * 1. Add these functions to your existing guestResponse.gs
  * 2. The webhook properties should already be set from the previous integration:
- *    - WEBHOOK_URL: Your Rambley webhook endpoint 
+ *    - WEBHOOK_URL: Your Ramble webhook endpoint 
  *    - WEBHOOK_API_KEY: Your webhook API key
- *    - ACCOUNT_ID: Your Rambley account ID
+ *    - ACCOUNT_ID: Your Ramble account ID
  */
 
 /**
- * Send message log data to Rambley webhook
+ * Send message log data to Ramble webhook
  * @param {Object} messageData - The message data object to send
  * @returns {Object} Response from the webhook
  */

@@ -55,14 +55,18 @@ const createContactsTables = async () => {
       )
     `);
 
-    // Create indexes for better performance
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_contacts_service_type ON contacts(service_type)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_contacts_active ON contacts(is_active)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_contacts_language ON contacts(preferred_language)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_properties_active ON properties(is_active)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_service_locations_contact ON contact_service_locations(contact_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_service_locations_property ON contact_service_locations(property_id)');
+    // Create indexes for better performance (wrapped in try-catch to handle existing tables)
+    try {
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_contacts_service_type ON contacts(service_type)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_contacts_active ON contacts(is_active)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_contacts_language ON contacts(preferred_language)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_properties_active ON properties(is_active)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_service_locations_contact ON contact_service_locations(contact_id)');
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_service_locations_property ON contact_service_locations(property_id)');
+    } catch (indexError) {
+      console.log('⚠️  Some indexes may already exist or columns missing, continuing...');
+    }
 
     console.log('✅ Contacts system tables created successfully');
     console.log('🎉 Contacts system setup completed successfully!');

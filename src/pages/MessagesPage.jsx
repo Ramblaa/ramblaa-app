@@ -234,7 +234,7 @@ export default function MessagesPage() {
       return (
         <div className="flex items-center gap-1 text-xs text-brand-mid-gray">
           <Bot className="h-3 w-3" />
-          <span>Rambley</span>
+          <span>Ramble</span>
         </div>
       )
     } else {
@@ -509,14 +509,14 @@ export default function MessagesPage() {
                       <div className={cn(
                         "px-3 sm:px-4 py-2 rounded-lg",
                         message.sender === 'host'
-                          ? "bg-brand-purple text-white" // Both Rambley and Host use purple background
+                          ? "bg-brand-purple text-white" // Both Ramble and Host use purple background
                           : "bg-brand-vanilla text-brand-dark" // Guest messages unchanged
                       )}>
                         <p className="text-sm leading-relaxed">{message.text}</p>
                         <p className={cn(
                           "text-xs mt-1",
                           message.sender === 'host'
-                            ? "text-white/70" // Both Rambley and Host timestamps
+                            ? "text-white/70" // Both Ramble and Host timestamps
                             : "text-brand-mid-gray" // Guest timestamp
                         )}>
                           {message.timestamp}

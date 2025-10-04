@@ -45,103 +45,6 @@ const transformTask = (dbTask) => ({
   conversations: [] // Will populate if needed
 });
 
-// Demo data for tasks
-const demoTasks = [
-  {
-    id: 1,
-    title: 'Demo cleaning task - Demo Villa',
-    type: 'cleaning',
-    property: 'Demo Villa',
-    assignee: 'Demo Cleaner',
-    dueDate: '2024-01-15',
-    dueTime: '11:00 AM',
-    status: 'pending',
-    priority: 'high',
-    description: 'This is a demo cleaning task created automatically from a guest message.',
-    threadCount: 2,
-    conversations: [
-      {
-        id: 'alex-demo-task1',
-        personName: 'Alex Demo',
-        personRole: 'Guest',
-        personType: 'guest',
-        lastActivity: '2:36 PM',
-        autoResponseEnabled: true,
-        messages: [
-          { id: 1, text: 'Can you create a task for me?', sender: 'guest', senderName: 'Alex Demo', timestamp: '2:35 PM' },
-          { id: 2, text: 'I\'ve created a demo task for you! You can see it in the tasks section.', sender: 'rambley', senderName: 'Rambley', timestamp: '2:36 PM' },
-          { id: 3, text: 'Demo cleaning task created. Assigned to Demo Cleaner.', sender: 'rambley', senderName: 'Rambley', timestamp: '2:36 PM', isSystemMessage: true }
-        ]
-      },
-      {
-        id: 'demo-cleaner-task1',
-        personName: 'Demo Cleaner',
-        personRole: 'Cleaning Staff',
-        personType: 'staff',
-        lastActivity: '2:38 PM',
-        autoResponseEnabled: false,
-        messages: [
-          { id: 4, text: 'Hi! There\'s a demo cleaning task at Demo Villa. Can you handle this?', sender: 'rambley', senderName: 'Rambley', timestamp: '2:37 PM' },
-          { id: 5, text: 'Sure! I\'ll take care of this demo task right away.', sender: 'staff', senderName: 'Demo Cleaner', timestamp: '2:38 PM' }
-        ]
-      }
-    ]
-  },
-  {
-    id: 2,
-    title: 'Test maintenance - Demo House',
-    type: 'maintenance',
-    property: 'Demo House',
-    assignee: 'Demo Technician',
-    dueDate: '2024-01-15',
-    dueTime: '2:00 PM',
-    status: 'in-progress',
-    priority: 'medium',
-    description: 'Sample maintenance task to demonstrate the system.',
-    threadCount: 1,
-    conversations: [
-      {
-        id: 'demo-technician-task2',
-        personName: 'Demo Technician',
-        personRole: 'Maintenance Staff',
-        personType: 'staff',
-        lastActivity: '2:28 PM',
-        autoResponseEnabled: false,
-        messages: [
-          { id: 1, text: 'We have a maintenance demo task at Demo House. Can you check it out?', sender: 'rambley', senderName: 'Rambley', timestamp: '2:26 PM' },
-          { id: 2, text: 'I\'m on it! This is a great demo of the system.', sender: 'staff', senderName: 'Demo Technician', timestamp: '2:28 PM' }
-        ]
-      }
-    ]
-  },
-  {
-    id: 3,
-    title: 'Sample inspection - Demo Villa',
-    type: 'inspection',
-    property: 'Demo Villa',
-    assignee: 'Demo Inspector',
-    dueDate: '2024-01-16',
-    dueTime: '10:00 AM',
-    status: 'completed',
-    priority: 'low',
-    description: 'Completed demo inspection task.',
-    threadCount: 1,
-    conversations: [
-      {
-        id: 'demo-inspector-task3',
-        personName: 'Demo Inspector',
-        personRole: 'Property Inspector',
-        personType: 'staff',
-        lastActivity: '2:22 PM',
-        autoResponseEnabled: false,
-        messages: [
-          { id: 1, text: 'Demo inspection task for Demo Villa has been completed successfully.', sender: 'staff', senderName: 'Demo Inspector', timestamp: '2:20 PM' },
-          { id: 2, text: 'Excellent! Thank you for completing the demo inspection.', sender: 'rambley', senderName: 'Rambley', timestamp: '2:22 PM' }
-        ]
-      }
-    ]
-  }
-]
 
 const statusColors = {
   pending: 'warning',
@@ -183,7 +86,7 @@ const personas = [
   },
   {
     id: 'rambley',
-    label: 'Rambley AI',
+    label: 'Ramble AI',
     description: 'AI-powered response',
     icon: Bot,
     color: 'bg-purple-100 text-purple-600',
@@ -297,10 +200,10 @@ export default function SandboxPage() {
   })
 
   // Get unique properties for task filter
-  const taskProperties = [...new Set(demoTasks.map(task => task.property))].sort()
+  const taskProperties = [...new Set(tasks.map(task => task.property))].sort()
 
   // Filter tasks
-  const filteredTasks = demoTasks.filter(task => {
+  const filteredTasks = tasks.filter(task => {
     const statusMatch = taskFilter === 'all' || 
       (taskFilter === 'upcoming' && task.status !== 'completed') ||
       (taskFilter === 'completed' && task.status === 'completed') ||
@@ -495,7 +398,7 @@ export default function SandboxPage() {
       return (
         <div className="flex items-center gap-1 text-xs text-brand-mid-gray">
           <Bot className="h-3 w-3" />
-          <span>Rambley</span>
+          <span>Ramble</span>
         </div>
       )
     } else if (message.senderType === 'staff') {
@@ -556,7 +459,7 @@ export default function SandboxPage() {
   }
 
   const getTaskCounts = (property = 'all') => {
-    const tasksToCount = property === 'all' ? demoTasks : demoTasks.filter(t => t.property === property)
+    const tasksToCount = property === 'all' ? tasks : tasks.filter(t => t.property === property)
     return {
       pending: tasksToCount.filter(t => t.status === 'pending').length,
       inProgress: tasksToCount.filter(t => t.status === 'in-progress').length,
@@ -826,7 +729,7 @@ export default function SandboxPage() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-brand-dark">Sandbox Mode</h1>
-                <p className="text-brand-mid-gray">Test and explore Rambley features in a safe demo environment</p>
+                <p className="text-brand-mid-gray">Test and explore Ramble features in a safe demo environment</p>
               </div>
             </div>
           </div>
@@ -1129,7 +1032,7 @@ export default function SandboxPage() {
                                         {message.sender === 'rambley' ? (
                                           <>
                                             <Bot className="h-3 w-3" />
-                                            <span>Rambley</span>
+                                            <span>Ramble</span>
                                           </>
                                         ) : message.sender === 'host' ? (
                                           <>

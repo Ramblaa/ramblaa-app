@@ -1,7 +1,7 @@
 # Webhook Setup Guide
 
 ## Overview
-This webhook endpoint allows your Google Sheets to send aiResponse data directly to your Rambley PostgreSQL database on Railway.
+This webhook endpoint allows your Google Sheets to send aiResponse data directly to your Ramble PostgreSQL database on Railway.
 
 ## Files Created
 1. `backend/scripts/guest-messages-migration.js` - Database migration script
@@ -69,12 +69,12 @@ openssl rand -hex 16
 **For Staging Testing:**
    - `WEBHOOK_URL`: `https://your-staging-app.railway.app/api/webhook/google-sheets-messages`
    - `WEBHOOK_API_KEY`: `rambley_staging_wh_k3y_2024_a7f9c2e1d8b6`
-   - `ACCOUNT_ID`: Your Rambley account ID (usually `1` for demo account)
+   - `ACCOUNT_ID`: Your Ramble account ID (usually `1` for demo account)
 
 **For Production:**
    - `WEBHOOK_URL`: `https://your-production-app.railway.app/api/webhook/google-sheets-messages`
    - `WEBHOOK_API_KEY`: `rambley_prod_wh_secure_2024_x9m7n3p5q8w2`
-   - `ACCOUNT_ID`: Your Rambley account ID (usually `1` for demo account)
+   - `ACCOUNT_ID`: Your Ramble account ID (usually `1` for demo account)
 
 ### 5. Testing
 **Staging Environment Testing:**
@@ -144,7 +144,7 @@ The `guest_messages` table stores all incoming data with these fields:
 
 ## Next Steps
 Once data is flowing into the `guest_messages` table, you can:
-1. Build a Messages page in your Rambley frontend
+1. Build a Messages page in your Ramble frontend
 2. Create API endpoints to retrieve and manage guest messages
 3. Add notification systems for new messages
 4. Integrate with your existing contacts and properties data

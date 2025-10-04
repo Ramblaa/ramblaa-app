@@ -1,6 +1,6 @@
-# 🚀 Rambley Git Workflow Guide
+# 🚀 Ramble Git Workflow Guide
 
-This guide outlines the robust version control and deployment workflow for the Rambley project.
+This guide outlines the robust version control and deployment workflow for the Ramble project.
 
 ## 📋 Branch Strategy
 

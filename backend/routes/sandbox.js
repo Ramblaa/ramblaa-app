@@ -547,4 +547,412 @@ router.get('/properties', async (req, res) => {
   }
 });
 
+// GET /api/sandbox/tasks - List all sandbox tasks
+router.get('/tasks', [
+  query('status').optional().trim(),
+  query('task_bucket').optional().trim(),
+  query('priority').optional().trim(),
+  query('page').optional().isInt({ min: 1 }),
+  query('limit').optional().isInt({ min: 1, max: 100 })
+], async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { accountId, userId } = req.user;
+    await setRLSContext(client, accountId, userId);
+
+    const {
+      status,
+      task_bucket,
+      priority,
+      page = 1,
+      limit = 50
+    } = req.query;
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    let whereConditions = ['ss.account_id = COALESCE(NULLIF(current_setting(\'app.current_account_id\', true), \'\')::INTEGER, (SELECT account_id FROM users WHERE id = COALESCE(NULLIF(current_setting(\'app.current_user_id\', true), \'\')::INTEGER, 0)))'];
+    let queryParams = [];
+    let paramCount = 0;
+
+    // Add filters
+    if (status) {
+      paramCount++;
+      whereConditions.push(`st.status = $${paramCount}`);
+      queryParams.push(status);
+    }
+
+    if (task_bucket) {
+      paramCount++;
+      whereConditions.push(`st.task_type = $${paramCount}`);
+      queryParams.push(task_bucket);
+    }
+
+    if (priority) {
+      paramCount++;
+      whereConditions.push(`st.priority = $${paramCount}`);
+      queryParams.push(priority);
+    }
+
+    const whereClause = whereConditions.join(' AND ');
+
+    // Main query to get sandbox tasks with session and property info
+    const query = `
+      SELECT
+        st.id,
+        st.task_title as title,
+        st.task_description as description,
+        st.task_type,
+        st.task_type as type,
+        st.assignee_name as assignee,
+        st.assigned_to_role as assignee_role,
+        st.status,
+        st.priority,
+        st.due_date,
+        st.due_time,
+        st.task_uuid,
+        st.created_at,
+        st.updated_at,
+        ss.scenario_data->>'guest_name' as guest_name,
+        ss.scenario_data->>'guest_phone' as guest_phone,
+        p.property_title as property,
+        p.property_location as property_address
+      FROM sandbox_tasks st
+      JOIN sandbox_sessions ss ON st.sandbox_session_id = ss.id
+      LEFT JOIN properties p ON CAST(ss.scenario_data->>'property_id' AS INTEGER) = p.id
+      WHERE ${whereClause}
+      ORDER BY st.created_at DESC
+      LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}
+    `;
+
+    queryParams.push(parseInt(limit), offset);
+    const result = await client.query(query, queryParams);
+
+    // Get total count
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM sandbox_tasks st
+      JOIN sandbox_sessions ss ON st.sandbox_session_id = ss.id
+      WHERE ${whereClause}
+    `;
+
+    const countResult = await client.query(countQuery, queryParams.slice(0, -2));
+    const total = parseInt(countResult.rows[0].total);
+
+    // Transform tasks to match TasksPage expected format
+    const tasks = result.rows.map(task => ({
+      id: task.id,
+      title: task.task_title || 'Untitled Task',
+      type: task.task_type || task.task_bucket?.toLowerCase() || 'general',
+      property: task.property || 'Unknown Property',
+      assignee: task.assignee_name || task.assigned_to_role || 'Unassigned',
+      dueDate: task.due_date || (task.created_at ? new Date(task.created_at).toISOString().split('T')[0] : null),
+      dueTime: task.due_time || (task.created_at ? new Date(task.created_at).toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      }) : null),
+      status: task.status || 'pending',
+      priority: task.priority || 'medium',
+      description: task.task_description || '',
+      threadCount: 1, // Static for now, could be enhanced later
+      guestName: task.guest_name,
+      guestPhone: task.guest_phone,
+      taskBucket: task.task_bucket,
+      actionHolder: task.action_holder,
+      guestRequirements: task.guest_requirements,
+      staffRequirements: task.staff_requirements,
+      hostEscalation: task.host_escalation,
+      createdAt: task.created_at,
+      updatedAt: task.updated_at
+    }));
+
+    res.json({
+      tasks,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching sandbox tasks:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/sandbox/tasks/:id - Get single sandbox task
+router.get('/tasks/:id', [
+  param('id').isInt({ min: 1 })
+], async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { id } = req.params;
+    const { accountId, userId } = req.user;
+    await setRLSContext(client, accountId, userId);
+
+    const query = `
+      SELECT
+        st.*,
+        ss.guest_name,
+        ss.guest_phone,
+        ss.scenario,
+        p.property_title as property,
+        p.property_location as property_address
+      FROM sandbox_tasks st
+      JOIN sandbox_sessions ss ON st.sandbox_session_id = ss.id
+      LEFT JOIN properties p ON CAST(ss.scenario->>'property_id' AS INTEGER) = p.id
+      WHERE st.id = $1 AND ss.account_id = COALESCE(
+        NULLIF(current_setting('app.current_account_id', true), '')::INTEGER,
+        (SELECT account_id FROM users WHERE id = COALESCE(
+          NULLIF(current_setting('app.current_user_id', true), '')::INTEGER,
+          0
+        ))
+      )
+    `;
+
+    const result = await client.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const task = result.rows[0];
+    res.json({
+      id: task.id,
+      title: task.task_title,
+      description: task.task_description,
+      type: task.task_category,
+      property: task.property,
+      assignee: task.assigned_to_role,
+      status: task.status,
+      priority: task.priority,
+      taskBucket: task.task_bucket,
+      actionHolder: task.action_holder,
+      guestRequirements: task.guest_requirements,
+      staffRequirements: task.staff_requirements,
+      hostEscalation: task.host_escalation,
+      guestName: task.guest_name,
+      guestPhone: task.guest_phone,
+      scenario: task.scenario,
+      createdAt: task.created_at,
+      updatedAt: task.updated_at
+    });
+
+  } catch (error) {
+    console.error('Error fetching sandbox task:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/sandbox/tasks/:id - Update sandbox task
+router.put('/tasks/:id', [
+  param('id').isInt({ min: 1 }),
+  body('status').optional().trim(),
+  body('assigned_to_role').optional().trim(),
+  body('priority').optional().trim(),
+  body('staff_requirements').optional().trim(),
+  body('guest_requirements').optional().trim(),
+  body('host_escalation').optional().isBoolean()
+], async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { id } = req.params;
+    const { accountId, userId } = req.user;
+    await setRLSContext(client, accountId, userId);
+
+    // Check if task exists and belongs to user's account
+    const taskCheck = await client.query(`
+      SELECT st.id FROM sandbox_tasks st
+      JOIN sandbox_sessions ss ON st.sandbox_session_id = ss.id
+      WHERE st.id = $1 AND ss.account_id = COALESCE(
+        NULLIF(current_setting('app.current_account_id', true), '')::INTEGER,
+        (SELECT account_id FROM users WHERE id = COALESCE(
+          NULLIF(current_setting('app.current_user_id', true), '')::INTEGER,
+          0
+        ))
+      )
+    `, [id]);
+
+    if (taskCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const updates = {};
+    const {
+      status,
+      assigned_to_role,
+      priority,
+      staff_requirements,
+      guest_requirements,
+      host_escalation
+    } = req.body;
+
+    // Build dynamic update query
+    const updateFields = [];
+    const updateValues = [];
+    let paramCount = 0;
+
+    if (status !== undefined) {
+      paramCount++;
+      updateFields.push(`status = $${paramCount}`);
+      updateValues.push(status);
+    }
+
+    if (assigned_to_role !== undefined) {
+      paramCount++;
+      updateFields.push(`assigned_to_role = $${paramCount}`);
+      updateValues.push(assigned_to_role);
+    }
+
+    if (priority !== undefined) {
+      paramCount++;
+      updateFields.push(`priority = $${paramCount}`);
+      updateValues.push(priority);
+    }
+
+    if (staff_requirements !== undefined) {
+      paramCount++;
+      updateFields.push(`staff_requirements = $${paramCount}`);
+      updateValues.push(staff_requirements);
+    }
+
+    if (guest_requirements !== undefined) {
+      paramCount++;
+      updateFields.push(`guest_requirements = $${paramCount}`);
+      updateValues.push(guest_requirements);
+    }
+
+    if (host_escalation !== undefined) {
+      paramCount++;
+      updateFields.push(`host_escalation = $${paramCount}`);
+      updateValues.push(host_escalation);
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    // Add updated_at and task id
+    updateFields.push('updated_at = CURRENT_TIMESTAMP');
+    updateValues.push(id);
+
+    const updateQuery = `
+      UPDATE sandbox_tasks
+      SET ${updateFields.join(', ')}
+      WHERE id = $${paramCount + 1}
+      RETURNING *
+    `;
+
+    const result = await client.query(updateQuery, updateValues);
+    const updatedTask = result.rows[0];
+
+    res.json({
+      id: updatedTask.id,
+      title: updatedTask.task_title,
+      description: updatedTask.task_description,
+      status: updatedTask.status,
+      priority: updatedTask.priority,
+      assignee: updatedTask.assigned_to_role,
+      taskBucket: updatedTask.task_bucket,
+      actionHolder: updatedTask.action_holder,
+      guestRequirements: updatedTask.guest_requirements,
+      staffRequirements: updatedTask.staff_requirements,
+      hostEscalation: updatedTask.host_escalation,
+      updatedAt: updatedTask.updated_at
+    });
+
+  } catch (error) {
+    console.error('Error updating sandbox task:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/sandbox/tasks/:id/complete - Mark task as completed
+router.post('/tasks/:id/complete', [
+  param('id').isInt({ min: 1 }),
+  body('completion_notes').optional().trim()
+], async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { id } = req.params;
+    const { completion_notes } = req.body;
+    const { accountId, userId } = req.user;
+    await setRLSContext(client, accountId, userId);
+
+    // Check if task exists and belongs to user's account
+    const taskCheck = await client.query(`
+      SELECT st.id, st.status FROM sandbox_tasks st
+      JOIN sandbox_sessions ss ON st.sandbox_session_id = ss.id
+      WHERE st.id = $1 AND ss.account_id = COALESCE(
+        NULLIF(current_setting('app.current_account_id', true), '')::INTEGER,
+        (SELECT account_id FROM users WHERE id = COALESCE(
+          NULLIF(current_setting('app.current_user_id', true), '')::INTEGER,
+          0
+        ))
+      )
+    `, [id]);
+
+    if (taskCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const updateQuery = `
+      UPDATE sandbox_tasks
+      SET status = 'completed',
+          completed_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *
+    `;
+
+    const result = await client.query(updateQuery, [id]);
+    const completedTask = result.rows[0];
+
+    res.json({
+      id: completedTask.id,
+      title: completedTask.task_title,
+      status: completedTask.status,
+      completedAt: completedTask.completed_at,
+      message: 'Task marked as completed successfully'
+    });
+
+  } catch (error) {
+    console.error('Error completing sandbox task:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
+  }
+});
+
 export default router;

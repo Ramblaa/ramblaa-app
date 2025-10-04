@@ -8,7 +8,7 @@ import { Input } from '../components/ui/input'
 import { useNotification } from '../contexts/NotificationContext'
 import AddTaskForm from '../components/AddTaskForm'
 
-const defaultPrompt = `You are Rambley, an AI assistant for property management. You help manage guest communications, staff coordination, and property operations.
+const defaultPrompt = `You are Ramble, an AI assistant for property management. You help manage guest communications, staff coordination, and property operations.
 
 CORE PRINCIPLES:
 - Always prioritize guest satisfaction and safety
@@ -234,7 +234,7 @@ export default function PromptPage() {
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
         <div className="min-w-0 flex-1">
           <h2 className="text-lg sm:text-xl font-semibold text-brand-dark">System Prompt Configuration</h2>
-          <p className="text-sm sm:text-base text-brand-mid-gray leading-relaxed">Configure how Rambley thinks about and handles all rules and interactions</p>
+          <p className="text-sm sm:text-base text-brand-mid-gray leading-relaxed">Configure how Ramble thinks about and handles all rules and interactions</p>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
           {isEdited && (
@@ -259,7 +259,7 @@ export default function PromptPage() {
               Core Instructions for AI Behavior
             </Label>
             <p className="text-sm text-brand-mid-gray mt-1 mb-3">
-              This prompt defines how Rambley processes information, makes decisions, and interacts with guests and staff. 
+              This prompt defines how Ramble processes information, makes decisions, and interacts with guests and staff. 
               It should include guidance on escalation rules, communication style, and decision-making principles.
             </p>
             <textarea
@@ -485,7 +485,7 @@ export default function PromptPage() {
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       <div className="min-w-0">
         <h1 className="text-xl sm:text-2xl font-bold text-brand-dark">AI Prompt Configuration</h1>
-        <p className="text-sm sm:text-base text-brand-mid-gray leading-relaxed">Configure how Rambley thinks about and handles all rules and interactions</p>
+        <p className="text-sm sm:text-base text-brand-mid-gray leading-relaxed">Configure how Ramble thinks about and handles all rules and interactions</p>
       </div>
 
       {/* Tabs */}

@@ -244,7 +244,12 @@ Please provide a JSON response with:
       actionRequired = true;
       priority = 'high';
       actionTitle = 'Help with property access';
-    } else if (message.includes('wifi') || message.includes('broken') || message.includes('fix')) {
+    } else if (message.includes('wifi') || message.includes('password') || message.includes('network')) {
+      category = 'amenities';
+      actionRequired = true;  // Changed to true
+      priority = 'medium';
+      actionTitle = 'WiFi information request';
+    } else if (message.includes('broken') || message.includes('fix') || message.includes('repair')) {
       category = 'maintenance';
       actionRequired = true;
       priority = 'medium';
@@ -576,54 +581,426 @@ Respond with JSON:
    * Create staff tasks based on message analysis
    */
   async createStaffTasks(sessionId, summaries) {
+    console.log(`[SandboxAI] createStaffTasks: Processing ${summaries.length} summaries`);
     const client = await pool.connect();
     const tasks = [];
 
     try {
-      for (const summary of summaries) {
-        // Check if task creation is needed
-        const needsTask = summary.summary.actionRequired &&
-                         ['maintenance', 'cleaning', 'urgent'].includes(summary.summary.priority);
-
-        if (!needsTask) continue;
-
-        // Determine task type and assignee
-        const taskDetails = this.determineTaskDetails(summary.summary);
-
-        const taskUuid = `TASK_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-        // Create task
-        await client.query(`
-          INSERT INTO sandbox_tasks (
-            sandbox_session_id, task_uuid, task_type, title, description,
-            property_id, assignee_name, assignee_role, status, priority,
-            created_from_message_uuid, metadata
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        `, [
-          sessionId,
-          taskUuid,
-          taskDetails.type,
-          taskDetails.title,
-          taskDetails.description,
-          taskDetails.property_id,
-          taskDetails.assignee_name,
-          taskDetails.assignee_role,
-          'pending',
-          summary.summary.priority,
-          summary.message_uuid,
-          { summary: summary.summary }
-        ]);
-
-        tasks.push({
-          task_uuid: taskUuid,
-          ...taskDetails
+      for (const [index, summary] of summaries.entries()) {
+        console.log(`[SandboxAI] Task Creation ${index + 1}/${summaries.length}:`, {
+          actionRequired: summary.summary.actionRequired,
+          category: summary.summary.category,
+          priority: summary.summary.priority
         });
+
+        // Check if task creation is needed based on category and action required
+        const taskBuckets = this.getTaskBucketsFromCategory(summary.summary.category);
+        const needsTask = summary.summary.actionRequired && taskBuckets.length > 0;
+
+        if (!needsTask) {
+          console.log(`[SandboxAI] Skipping task creation ${index + 1}: No action required or no task buckets found`);
+          continue;
+        }
+
+        console.log(`[SandboxAI] Task buckets identified for ${summary.summary.category}:`, taskBuckets);
+
+        // Get session property info for task creation
+        const sessionData = await this.getSessionData(sessionId, client);
+
+        // Create tasks for each bucket (mimics Google Apps Script logic)
+        for (const taskBucket of taskBuckets) {
+          // Check if similar task already exists
+          const existingTask = await this.findExistingOpenTask(sessionId, taskBucket, client);
+          if (existingTask) {
+            console.log(`[SandboxAI] Skipping duplicate task creation for bucket: ${taskBucket}`);
+            continue;
+          }
+
+          // Determine task details based on task bucket
+          const taskDetails = this.determineTaskDetailsByBucket(taskBucket, summary.summary, sessionData);
+
+          const taskUuid = `TASK_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+          console.log(`[SandboxAI] Creating task:`, {
+            taskBucket,
+            taskUuid,
+            type: taskDetails.type,
+            title: taskDetails.title
+          });
+
+          // Create task
+          await client.query(`
+            INSERT INTO sandbox_tasks (
+              sandbox_session_id, task_title, task_description,
+              assigned_to_role, assignee_name, status, priority, task_type,
+              due_date, due_time
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          `, [
+            sessionId,
+            taskDetails.title,
+            taskDetails.description,
+            taskDetails.assignee_role,
+            taskDetails.assignee_name,
+            taskDetails.status,
+            summary.summary.priority,
+            taskDetails.task_type,
+            taskDetails.due_date,
+            taskDetails.due_time
+          ]);
+
+          tasks.push({
+            task_uuid: taskUuid,
+            task_bucket: taskBucket,
+            ...taskDetails
+          });
+        }
       }
 
+      console.log(`[SandboxAI] createStaffTasks completed: Created ${tasks.length} tasks`);
       return tasks;
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Get task buckets from message category (mimics Google Apps Script task categorization)
+   */
+  getTaskBucketsFromCategory(category) {
+    // Map message categories to task buckets based on Google Apps Script logic
+    const categoryToTaskBuckets = {
+      'maintenance': ['Maintenance', 'Repairs'],
+      'cleaning': ['Cleaning', 'Housekeeping'],
+      'amenities': ['Property Support', 'Guest Services'],
+      'check-in': ['Check-in Support'],
+      'check-out': ['Check-out Support'],
+      'booking': ['Booking Support'],
+      'complaint': ['Property Management', 'Guest Relations'],
+      'urgent': ['Emergency Response', 'Priority Support'],
+      'general': ['General Support']
+    };
+
+    return categoryToTaskBuckets[category] || ['General Support'];
+  }
+
+  /**
+   * Find existing open task for the same bucket to avoid duplicates
+   */
+  async findExistingOpenTask(sessionId, taskBucket, client) {
+    const query = `
+      SELECT * FROM sandbox_tasks
+      WHERE sandbox_session_id = $1
+        AND task_bucket = $2
+        AND status NOT IN ('completed', 'cancelled', 'closed')
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+
+    const result = await client.query(query, [sessionId, taskBucket]);
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Get session data for task creation
+   */
+  async getSessionData(sessionId, client) {
+    const query = `
+      SELECT ss.*, p.id as property_id, p.property_title
+      FROM sandbox_sessions ss
+      LEFT JOIN properties p ON (ss.scenario_data->>'property_id')::INTEGER = p.id
+      WHERE ss.id = $1
+    `;
+
+    const result = await client.query(query, [sessionId]);
+    return result.rows[0] || {};
+  }
+
+  /**
+   * Determine comprehensive task details based on task bucket (Google Apps Script approach)
+   */
+  determineTaskDetailsByBucket(taskBucket, summary, sessionData) {
+    // Generate meaningful task title based on category and key information
+    const taskTitle = this.generateTaskTitle(taskBucket, summary, sessionData);
+
+    // Calculate due date based on task priority and type
+    const dueDate = this.calculateDueDate(summary.priority, taskBucket);
+
+    const baseDetails = {
+      title: taskTitle,
+      description: this.buildTaskDescription(summary, taskBucket, sessionData),
+      property_id: sessionData.property_id || null,
+      property_name: sessionData.property_title || 'Unknown Property',
+      status: 'pending',
+      due_date: dueDate.date,
+      due_time: dueDate.time
+    };
+
+    // Task bucket specific configuration (mimics Google Apps Script task definitions)
+    const taskConfig = this.getTaskConfiguration(taskBucket);
+
+    // Determine action holder based on requirements
+    const hasGuestRequirements = taskConfig.guest_requirements && taskConfig.guest_requirements.length > 0;
+    const action_holder = hasGuestRequirements ? 'Guest' : 'Staff';
+
+    return {
+      ...baseDetails,
+      type: taskConfig.type,
+      assignee_name: taskConfig.staff_name || 'Support Team',
+      assignee_role: taskConfig.staff_role || 'Support Staff',
+      action_holder,
+      guest_requirements: taskConfig.guest_requirements || '',
+      staff_requirements: taskConfig.staff_requirements || '',
+      host_escalation: taskConfig.host_escalation || false
+    };
+  }
+
+  /**
+   * Get task configuration for specific task bucket
+   */
+  getTaskConfiguration(taskBucket) {
+    const taskConfigurations = {
+      'Maintenance': {
+        type: 'maintenance',
+        staff_name: 'Maintenance Team',
+        staff_role: 'Maintenance Technician',
+        staff_requirements: 'Assess issue, provide repair estimate, complete repairs',
+        guest_requirements: 'Provide access to property for inspection',
+        host_escalation: false
+      },
+      'Repairs': {
+        type: 'maintenance',
+        staff_name: 'Repair Specialist',
+        staff_role: 'Repair Technician',
+        staff_requirements: 'Diagnose problem, source parts, complete repair work',
+        guest_requirements: 'Schedule convenient repair time',
+        host_escalation: false
+      },
+      'Cleaning': {
+        type: 'cleaning',
+        staff_name: 'Housekeeping Team',
+        staff_role: 'Housekeeper',
+        staff_requirements: 'Address cleaning concerns, refresh amenities',
+        guest_requirements: '',
+        host_escalation: false
+      },
+      'Housekeeping': {
+        type: 'cleaning',
+        staff_name: 'Housekeeping Supervisor',
+        staff_role: 'Housekeeping Manager',
+        staff_requirements: 'Coordinate additional cleaning, quality check',
+        guest_requirements: '',
+        host_escalation: false
+      },
+      'Property Support': {
+        type: 'support',
+        staff_name: 'Property Support',
+        staff_role: 'Property Assistant',
+        staff_requirements: 'Provide property information and assistance',
+        guest_requirements: '',
+        host_escalation: false
+      },
+      'Guest Services': {
+        type: 'service',
+        staff_name: 'Guest Services',
+        staff_role: 'Guest Relations',
+        staff_requirements: 'Address guest needs and requests',
+        guest_requirements: '',
+        host_escalation: false
+      },
+      'Check-in Support': {
+        type: 'checkin',
+        staff_name: 'Check-in Coordinator',
+        staff_role: 'Front Desk',
+        staff_requirements: 'Facilitate smooth check-in process',
+        guest_requirements: 'Provide arrival time and contact information',
+        host_escalation: false
+      },
+      'Check-out Support': {
+        type: 'checkout',
+        staff_name: 'Check-out Coordinator',
+        staff_role: 'Front Desk',
+        staff_requirements: 'Process check-out and property inspection',
+        guest_requirements: 'Complete departure checklist',
+        host_escalation: false
+      },
+      'Property Management': {
+        type: 'management',
+        staff_name: 'Property Manager',
+        staff_role: 'Management',
+        staff_requirements: 'Investigate issue, develop resolution plan',
+        guest_requirements: '',
+        host_escalation: true
+      },
+      'Guest Relations': {
+        type: 'relations',
+        staff_name: 'Guest Relations Manager',
+        staff_role: 'Management',
+        staff_requirements: 'Address guest concerns, provide compensation if needed',
+        guest_requirements: '',
+        host_escalation: true
+      },
+      'Emergency Response': {
+        type: 'emergency',
+        staff_name: 'Emergency Coordinator',
+        staff_role: 'Emergency Response',
+        staff_requirements: 'Immediate response, coordinate emergency services',
+        guest_requirements: 'Provide emergency contact information',
+        host_escalation: true
+      },
+      'General Support': {
+        type: 'general',
+        staff_name: 'Support Team',
+        staff_role: 'Support Staff',
+        staff_requirements: 'Provide general assistance and information',
+        guest_requirements: '',
+        host_escalation: false
+      }
+    };
+
+    return taskConfigurations[taskBucket] || taskConfigurations['General Support'];
+  }
+
+  /**
+   * Build comprehensive task description
+   */
+  buildTaskDescription(summary, taskBucket, sessionData = {}) {
+    const parts = [
+      `Property: ${sessionData.property_title || 'Unknown Property'}`,
+      `Guest: ${sessionData.guest_name || 'Unknown Guest'}`,
+      '',
+      `Task Type: ${taskBucket}`,
+      `Category: ${summary.category}`,
+      `Priority: ${summary.priority}`,
+      `Sentiment: ${summary.sentiment}`,
+      `Tone: ${summary.tone}`,
+      ''
+    ];
+
+    if (summary.keyInformation && summary.keyInformation.length > 0) {
+      parts.push(`Issue Details:`);
+      summary.keyInformation.forEach(info => {
+        parts.push(`- ${info}`);
+      });
+      parts.push('');
+    }
+
+    if (summary.actionTitle) {
+      parts.push(`Action Required: ${summary.actionTitle}`);
+      parts.push('');
+    }
+
+    if (summary.suggestedResponse) {
+      parts.push(`Suggested Response: ${summary.suggestedResponse}`);
+      parts.push('');
+    }
+
+    // Add property details if available
+    if (sessionData.property_location) {
+      parts.push(`Property Location: ${sessionData.property_location}`);
+    }
+
+    return parts.join('\n');
+  }
+
+  /**
+   * Generate meaningful task title based on context
+   */
+  generateTaskTitle(taskBucket, summary, sessionData) {
+    // Extract key information for title
+    const keyInfo = summary.keyInformation && summary.keyInformation.length > 0
+      ? summary.keyInformation[0]
+      : null;
+
+    const propertyName = sessionData.property_title || 'Property';
+
+    // Generate contextual titles based on category and task bucket
+    const titleTemplates = {
+      'maintenance': {
+        'Maintenance': keyInfo ? `Maintenance Issue: ${keyInfo} - ${propertyName}` : `Maintenance Request - ${propertyName}`,
+        'Repairs': keyInfo ? `Repair Needed: ${keyInfo} - ${propertyName}` : `Repair Request - ${propertyName}`
+      },
+      'cleaning': {
+        'Cleaning': keyInfo ? `Cleaning Issue: ${keyInfo} - ${propertyName}` : `Cleaning Request - ${propertyName}`,
+        'Housekeeping': keyInfo ? `Housekeeping: ${keyInfo} - ${propertyName}` : `Housekeeping Request - ${propertyName}`
+      },
+      'amenities': {
+        'Property Support': keyInfo ? `Property Support: ${keyInfo} - ${propertyName}` : `Property Support Request - ${propertyName}`,
+        'Guest Services': keyInfo ? `Guest Services: ${keyInfo} - ${propertyName}` : `Guest Services Request - ${propertyName}`
+      },
+      'complaint': {
+        'Property Management': keyInfo ? `Property Issue: ${keyInfo} - ${propertyName}` : `Property Management Issue - ${propertyName}`,
+        'Guest Relations': keyInfo ? `Guest Concern: ${keyInfo} - ${propertyName}` : `Guest Relations Issue - ${propertyName}`
+      }
+    };
+
+    // Get template based on category and task bucket
+    const categoryTemplates = titleTemplates[summary.category];
+    if (categoryTemplates && categoryTemplates[taskBucket]) {
+      return categoryTemplates[taskBucket];
+    }
+
+    // Fallback to actionTitle or generic title
+    if (summary.actionTitle) {
+      return `${summary.actionTitle} - ${propertyName}`;
+    }
+
+    return `${taskBucket} Request - ${propertyName}`;
+  }
+
+  /**
+   * Calculate realistic due date and time based on priority and task type
+   */
+  calculateDueDate(priority, taskBucket) {
+    const now = new Date();
+    let hoursToAdd = 24; // default 24 hours
+
+    // Adjust hours based on priority
+    switch (priority?.toLowerCase()) {
+      case 'high':
+      case 'urgent':
+        hoursToAdd = 4; // 4 hours for urgent tasks
+        break;
+      case 'medium':
+        hoursToAdd = 12; // 12 hours for medium priority
+        break;
+      case 'low':
+        hoursToAdd = 48; // 48 hours for low priority
+        break;
+    }
+
+    // Adjust based on task type
+    switch (taskBucket) {
+      case 'Maintenance':
+      case 'Repairs':
+        hoursToAdd += 12; // Maintenance tasks take longer
+        break;
+      case 'Cleaning':
+      case 'Housekeeping':
+        hoursToAdd += 2; // Cleaning can be done quickly
+        break;
+      case 'Property Support':
+      case 'Guest Services':
+        hoursToAdd = Math.max(hoursToAdd - 2, 2); // Service requests should be fast
+        break;
+    }
+
+    const dueDate = new Date(now.getTime() + (hoursToAdd * 60 * 60 * 1000));
+
+    // Format date as YYYY-MM-DD
+    const dateStr = dueDate.toISOString().split('T')[0];
+
+    // Set reasonable business hours (9 AM - 5 PM)
+    const hour = dueDate.getHours();
+    let businessHour = hour;
+    if (hour < 9) businessHour = 9;
+    if (hour > 17) businessHour = 17;
+
+    const timeStr = `${businessHour.toString().padStart(2, '0')}:00`;
+
+    return {
+      date: dateStr,
+      time: timeStr
+    };
   }
 
   /**

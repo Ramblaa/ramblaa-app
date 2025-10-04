@@ -125,7 +125,7 @@ export default function LoginPage() {
             <div className="mx-auto mb-4 w-20 h-20 bg-brand-purple rounded-full flex items-center justify-center">
               <span className="text-2xl font-bold text-white">R</span>
             </div>
-            <CardTitle className="text-2xl text-brand-dark">Welcome to Rambley</CardTitle>
+            <CardTitle className="text-2xl text-brand-dark">Welcome to Ramble</CardTitle>
             <CardDescription className="text-brand-mid-gray">
               {mode === 'login' ? 'Sign in to access your dashboard' : 'Create your account to get started'}
             </CardDescription>

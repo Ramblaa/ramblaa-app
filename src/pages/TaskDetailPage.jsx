@@ -32,9 +32,9 @@ const tasks = [
         autoResponseEnabled: true,
         messages: [
           { id: 1, text: 'Could I get some fresh towels delivered to the room?', sender: 'guest', senderName: 'Sarah Johnson', timestamp: '2:05 PM' },
-          { id: 2, text: 'Of course! I\'ll arrange for fresh towels to be delivered within the hour.', sender: 'rambley', senderName: 'Rambley', timestamp: '2:06 PM' },
-          { id: 3, text: 'Task created: Fresh towel delivery for Room 12. Assigned to Maria Garcia.', sender: 'rambley', senderName: 'Rambley', timestamp: '2:06 PM', isSystemMessage: true },
-          { id: 4, text: 'Your fresh towels are on the way! Maria will deliver them within 15 minutes.', sender: 'rambley', senderName: 'Rambley', timestamp: '2:12 PM' },
+          { id: 2, text: 'Of course! I\'ll arrange for fresh towels to be delivered within the hour.', sender: 'rambley', senderName: 'Ramble', timestamp: '2:06 PM' },
+          { id: 3, text: 'Task created: Fresh towel delivery for Room 12. Assigned to Maria Garcia.', sender: 'rambley', senderName: 'Ramble', timestamp: '2:06 PM', isSystemMessage: true },
+          { id: 4, text: 'Your fresh towels are on the way! Maria will deliver them within 15 minutes.', sender: 'rambley', senderName: 'Ramble', timestamp: '2:12 PM' },
           { id: 5, text: 'Great, thank you so much!', sender: 'guest', senderName: 'Sarah Johnson', timestamp: '2:13 PM' }
         ]
       },
@@ -46,9 +46,9 @@ const tasks = [
         lastActivity: '2:11 PM',
         autoResponseEnabled: false,
         messages: [
-          { id: 6, text: 'Hi Maria! Guest in Room 12 needs fresh towels delivered ASAP. Can you handle this?', sender: 'rambley', senderName: 'Rambley', timestamp: '2:07 PM' },
+          { id: 6, text: 'Hi Maria! Guest in Room 12 needs fresh towels delivered ASAP. Can you handle this?', sender: 'rambley', senderName: 'Ramble', timestamp: '2:07 PM' },
           { id: 7, text: 'Sure! I\'m finishing up Room 8, will be there in 15 minutes.', sender: 'staff', senderName: 'Maria Garcia', timestamp: '2:10 PM' },
-          { id: 8, text: 'Perfect, thank you Maria!', sender: 'rambley', senderName: 'Rambley', timestamp: '2:11 PM' }
+          { id: 8, text: 'Perfect, thank you Maria!', sender: 'rambley', senderName: 'Ramble', timestamp: '2:11 PM' }
         ]
       }
     ]
@@ -73,7 +73,7 @@ const tasks = [
         lastActivity: '2:15 PM',
         autoResponseEnabled: false,
         messages: [
-          { id: 1, text: 'John, we have a WiFi issue at Mountain Retreat. Guest says the password isn\'t working.', sender: 'rambley', senderName: 'Rambley', timestamp: '1:35 PM' },
+          { id: 1, text: 'John, we have a WiFi issue at Mountain Retreat. Guest says the password isn\'t working.', sender: 'rambley', senderName: 'Ramble', timestamp: '1:35 PM' },
           { id: 2, text: 'I\'ll check the router remotely first, then head over if needed.', sender: 'staff', senderName: 'John Smith', timestamp: '1:40 PM' },
           { id: 3, text: 'Router looks fine. Password should be "MountainView2024". Let me verify the connection.', sender: 'staff', senderName: 'John Smith', timestamp: '2:15 PM' }
         ]
@@ -87,8 +87,8 @@ const tasks = [
         autoResponseEnabled: true,
         messages: [
           { id: 4, text: 'Hi, I just checked in but the WiFi password isn\'t working', sender: 'guest', senderName: 'Mike Chen', timestamp: '1:55 PM' },
-          { id: 5, text: 'Hi Mike! Let me help you with that. Try "MountainView2024" - make sure to include the capital letters. I\'ve also created a tech support task to verify the connection.', sender: 'rambley', senderName: 'Rambley', timestamp: '1:58 PM' },
-          { id: 6, text: 'WiFi troubleshooting task created. Assigned to John Smith.', sender: 'rambley', senderName: 'Rambley', timestamp: '1:58 PM', isSystemMessage: true }
+          { id: 5, text: 'Hi Mike! Let me help you with that. Try "MountainView2024" - make sure to include the capital letters. I\'ve also created a tech support task to verify the connection.', sender: 'rambley', senderName: 'Ramble', timestamp: '1:58 PM' },
+          { id: 6, text: 'WiFi troubleshooting task created. Assigned to John Smith.', sender: 'rambley', senderName: 'Ramble', timestamp: '1:58 PM', isSystemMessage: true }
         ]
       }
     ]
@@ -113,7 +113,7 @@ const tasks = [
         lastActivity: '12:52 PM',
         autoResponseEnabled: false,
         messages: [
-          { id: 1, text: 'John, we have a dripping faucet at Beach House bathroom. Guest reported it during checkout.', sender: 'rambley', senderName: 'Rambley', timestamp: '12:51 PM' },
+          { id: 1, text: 'John, we have a dripping faucet at Beach House bathroom. Guest reported it during checkout.', sender: 'rambley', senderName: 'Ramble', timestamp: '12:51 PM' },
           { id: 2, text: 'Got it. I can take a look tomorrow morning. Probably just needs a new washer.', sender: 'staff', senderName: 'John Smith', timestamp: '12:52 PM' }
         ]
       },
@@ -126,10 +126,10 @@ const tasks = [
         autoResponseEnabled: false,
         messages: [
           { id: 3, text: 'Hi! We had a wonderful stay. Just wanted to let you know we\'ve checked out and left the keys on the counter.', sender: 'guest', senderName: 'Emma Rodriguez', timestamp: '12:30 PM' },
-          { id: 4, text: 'Thank you Emma! So glad you enjoyed your stay. Hope to host you again soon!', sender: 'rambley', senderName: 'Rambley', timestamp: '12:32 PM' },
+          { id: 4, text: 'Thank you Emma! So glad you enjoyed your stay. Hope to host you again soon!', sender: 'rambley', senderName: 'Ramble', timestamp: '12:32 PM' },
           { id: 5, text: 'Actually, we noticed the bathroom faucet was dripping. Thought you should know.', sender: 'guest', senderName: 'Emma Rodriguez', timestamp: '12:45 PM' },
-          { id: 6, text: 'Thanks for letting us know! I\'ve logged this for our maintenance team.', sender: 'rambley', senderName: 'Rambley', timestamp: '12:50 PM' },
-          { id: 7, text: 'Maintenance task created: Fix dripping bathroom faucet. Assigned to John Smith.', sender: 'rambley', senderName: 'Rambley', timestamp: '12:50 PM', isSystemMessage: true }
+          { id: 6, text: 'Thanks for letting us know! I\'ve logged this for our maintenance team.', sender: 'rambley', senderName: 'Ramble', timestamp: '12:50 PM' },
+          { id: 7, text: 'Maintenance task created: Fix dripping bathroom faucet. Assigned to John Smith.', sender: 'rambley', senderName: 'Ramble', timestamp: '12:50 PM', isSystemMessage: true }
         ]
       }
     ]
@@ -154,9 +154,9 @@ const tasks = [
         lastActivity: '12:51 PM',
         autoResponseEnabled: false,
         messages: [
-          { id: 1, text: 'Sarah, we need a post-checkout inspection at Beach House tomorrow. Guest checked out this morning.', sender: 'rambley', senderName: 'Rambley', timestamp: '12:50 PM' },
+          { id: 1, text: 'Sarah, we need a post-checkout inspection at Beach House tomorrow. Guest checked out this morning.', sender: 'rambley', senderName: 'Ramble', timestamp: '12:50 PM' },
           { id: 2, text: 'Sure thing! I\'ll do the inspection tomorrow afternoon after the maintenance work is done.', sender: 'staff', senderName: 'Sarah Wilson', timestamp: '12:51 PM' },
-          { id: 3, text: 'Inspection task created: Post-checkout inspection. Assigned to Sarah Wilson.', sender: 'rambley', senderName: 'Rambley', timestamp: '12:51 PM', isSystemMessage: true }
+          { id: 3, text: 'Inspection task created: Post-checkout inspection. Assigned to Sarah Wilson.', sender: 'rambley', senderName: 'Ramble', timestamp: '12:51 PM', isSystemMessage: true }
         ]
       }
     ]
@@ -479,7 +479,7 @@ export default function TaskDetailPage() {
                     transition={{ delay: index * 0.1 }}
                     className={cn(
                       "flex",
-                      // Guest messages and contact messages (like Maria) on left, Rambley/host on right
+                      // Guest messages and contact messages (like Maria) on left, Ramble/host on right
                       message.sender === 'guest' || (message.sender !== 'guest' && message.sender !== 'rambley' && message.sender !== 'host') 
                         ? "justify-start" 
                         : "justify-end",
@@ -493,7 +493,7 @@ export default function TaskDetailPage() {
                     ) : (
                       <div className={cn(
                         "max-w-[85%] sm:max-w-xs lg:max-w-md",
-                        // Guest messages and contact messages (like Maria) on left, Rambley/host on right
+                        // Guest messages and contact messages (like Maria) on left, Ramble/host on right
                         message.sender === 'guest' || (message.sender !== 'guest' && message.sender !== 'rambley' && message.sender !== 'host')
                           ? "mr-4 sm:mr-12" 
                           : "ml-4 sm:ml-12"
@@ -502,7 +502,7 @@ export default function TaskDetailPage() {
                         {message.sender !== 'guest' && (message.sender === 'rambley' || message.sender === 'host') && (
                           <div className={cn(
                             "flex mb-1",
-                            // Contact messages (like Maria) show badge on left, Rambley/host on right
+                            // Contact messages (like Maria) show badge on left, Ramble/host on right
                             message.sender !== 'rambley' && message.sender !== 'host'
                               ? "justify-start"
                               : "justify-end"
@@ -511,7 +511,7 @@ export default function TaskDetailPage() {
                               {message.sender === 'rambley' ? (
                                 <>
                                   <Bot className="h-3 w-3" />
-                                  <span>Rambley</span>
+                                  <span>Ramble</span>
                                 </>
                               ) : message.sender === 'host' ? (
                                 <>
@@ -532,7 +532,7 @@ export default function TaskDetailPage() {
                           message.sender === 'guest'
                             ? "bg-brand-vanilla text-brand-dark" // Guest messages on left
                             : message.sender === 'rambley' || message.sender === 'host'
-                              ? "bg-brand-purple text-white" // Rambley and Host messages on right (purple)
+                              ? "bg-brand-purple text-white" // Ramble and Host messages on right (purple)
                               : "bg-brand-dark text-brand-vanilla" // Contact messages on left (dark background, vanilla text)
                         )}>
                           <p className="text-sm">{message.text}</p>
@@ -541,7 +541,7 @@ export default function TaskDetailPage() {
                             message.sender === 'guest'
                               ? "text-brand-mid-gray" // Guest timestamp
                               : message.sender === 'rambley' || message.sender === 'host'
-                                ? "text-white/70" // Rambley and Host timestamps
+                                ? "text-white/70" // Ramble and Host timestamps
                                 : "text-brand-vanilla/70" // Contact timestamp
                           )}>
                             {message.timestamp}

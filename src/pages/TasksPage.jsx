@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Calendar, Clock, MapPin, User, Plus, Wrench, Brush, Search, Package, MessageCircle, Check, Trash2 } from 'lucide-react'
 import { Button } from '../components/ui/button'
@@ -8,74 +8,94 @@ import { Input } from '../components/ui/input'
 import { cn } from '../lib/utils'
 import { useNavigate } from 'react-router-dom'
 
-// Mock data
-const tasks = [
-  {
-    id: 1,
-    title: 'Deliver fresh towels - Room 12',
-    type: 'cleaning',
-    property: 'Sunset Villa',
-    assignee: 'Maria Garcia',
-    dueDate: '2024-01-15',
-    dueTime: '11:00 AM',
-    status: 'pending',
-    priority: 'high',
-    description: 'Deep clean after guest checkout. Focus on kitchen and bathrooms.',
-    threadCount: 3
-  },
-  {
-    id: 2,
-    title: 'WiFi troubleshooting - Mountain Retreat',
-    type: 'maintenance',
-    property: 'Mountain Retreat',
-    assignee: 'John Smith',
-    dueDate: '2024-01-15',
-    dueTime: '2:00 PM',
-    status: 'in-progress',
-    priority: 'medium',
-    description: 'Guest reported WiFi password issues.',
-    threadCount: 2
-  },
-  {
-    id: 3,
-    title: 'Fix dripping bathroom faucet - Beach House',
-    type: 'maintenance',
-    property: 'Beach House',
-    assignee: 'John Smith',
-    dueDate: '2024-01-16',
-    dueTime: '10:00 AM',
-    status: 'pending',
-    priority: 'medium',
-    description: 'Guest reported dripping faucet in bathroom.',
-    threadCount: 1
-  },
-  {
-    id: 4,
-    title: 'Post-checkout inspection - Beach House',
-    type: 'inspection',
-    property: 'Beach House',
-    assignee: 'Sarah Wilson',
-    dueDate: '2024-01-16',
-    dueTime: '2:00 PM',
-    status: 'pending',
-    priority: 'low',
-    description: 'Routine post-checkout property inspection.',
-    threadCount: 1
-  },
-  {
-    id: 5,
-    title: 'Restocking - Sunset Villa',
-    type: 'restocking',
-    property: 'Sunset Villa',
-    assignee: 'David Lee',
-    dueDate: '2024-01-13',
-    dueTime: '1:00 PM',
-    status: 'completed',
-    priority: 'low',
-    description: 'Restock toiletries and kitchen essentials.',
-    threadCount: 1
-  },
-]
+// API base URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
+
+// Fetch tasks from API
+const fetchTasks = async () => {
+  try {
+    const token = localStorage.getItem('authToken')
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` })
+    }
+
+    // Fetch sandbox tasks directly from the tasks endpoint
+    const response = await fetch(`${API_BASE_URL}/sandbox/tasks`, { headers })
+
+    if (response.ok) {
+      const data = await response.json()
+      const tasks = data.tasks.map(task => ({
+        id: task.id,
+        title: task.title || 'Untitled Task',
+        type: task.type || task.task_type || 'general',
+        assignee: task.assignee || task.assignee_name || 'Unassigned',
+        dueDate: task.due_date || (task.created_at ? new Date(task.created_at).toISOString().split('T')[0] : null),
+        dueTime: task.due_time || '09:00',
+        status: task.status || 'pending',
+        priority: task.priority || 'medium',
+        property: task.property || 'Unknown Property',
+        guest: task.guest_name || 'Unknown Guest',
+        source: 'sandbox'
+      }))
+      return tasks
+    }
+
+    console.error('Failed to fetch tasks:', response.status, response.statusText)
+    return []
+  } catch (error) {
+    console.error('Error fetching tasks:', error)
+    return []
+  }
+}
+
+// Update task status via API
+const updateTaskStatus = async (taskId, status, source = 'sandbox') => {
+  try {
+    const token = localStorage.getItem('authToken')
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` })
+    }
+
+    if (source === 'sandbox') {
+      const response = await fetch(`${API_BASE_URL}/sandbox/tasks/${taskId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ status })
+      })
+      return response.ok
+    }
+    return false
+  } catch (error) {
+    console.error('Error updating task:', error)
+    return false
+  }
+}
+
+// Complete task via API
+const completeTask = async (taskId, source = 'sandbox') => {
+  try {
+    const token = localStorage.getItem('authToken')
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` })
+    }
+
+    if (source === 'sandbox') {
+      const response = await fetch(`${API_BASE_URL}/sandbox/tasks/${taskId}/complete`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({})
+      })
+      return response.ok
+    }
+    return false
+  } catch (error) {
+    console.error('Error completing task:', error)
+    return false
+  }
+}
 
 const statusColors = {
   pending: 'warning',
@@ -101,13 +121,53 @@ export default function TasksPage() {
   const [filter, setFilter] = useState('all')
   const [propertyFilter, setPropertyFilter] = useState('all')
   const [searchTerm, setSearchTerm] = useState('')
+  const [tasks, setTasks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  // Fetch tasks on component mount
+  useEffect(() => {
+    let mounted = true // Prevent state updates on unmounted component
+
+    const loadTasks = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const fetchedTasks = await fetchTasks()
+        if (mounted) {
+          setTasks(fetchedTasks)
+        }
+      } catch (err) {
+        if (mounted) {
+          setError('Failed to load tasks')
+          console.error('Error loading tasks:', err)
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadTasks()
+
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  // Refresh tasks function
+  const refreshTasks = async () => {
+    const fetchedTasks = await fetchTasks()
+    setTasks(fetchedTasks)
+  }
 
   // Get unique properties for the filter dropdown
   const properties = [...new Set(tasks.map(task => task.property))].sort()
 
   const filteredTasks = tasks.filter(task => {
     // Status filter
-    const statusMatch = filter === 'all' || 
+    const statusMatch = filter === 'all' ||
       (filter === 'upcoming' && task.status !== 'completed') ||
       (filter === 'completed' && task.status === 'completed') ||
       task.status === filter
@@ -116,7 +176,7 @@ export default function TasksPage() {
     const propertyMatch = propertyFilter === 'all' || task.property === propertyFilter
 
     // Search filter
-    const searchMatch = !searchTerm.trim() || 
+    const searchMatch = !searchTerm.trim() ||
       task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       task.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
       task.property.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -138,15 +198,27 @@ export default function TasksPage() {
 
   const counts = getTaskCounts(propertyFilter)
 
-  const handleMarkComplete = (e, taskId) => {
+  const handleMarkComplete = async (e, taskId) => {
     e.stopPropagation()
-    // In real app, this would update the task status via API
-    console.log('Marking task complete:', taskId)
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) return
+
+    const success = await completeTask(taskId, task.source)
+    if (success) {
+      // Update local state immediately for better UX
+      setTasks(prev => prev.map(t =>
+        t.id === taskId ? { ...t, status: 'completed' } : t
+      ))
+      // Refresh from server to ensure consistency
+      setTimeout(refreshTasks, 500)
+    } else {
+      setError('Failed to mark task as complete')
+    }
   }
 
   const handleDeleteTask = (e, taskId) => {
     e.stopPropagation()
-    // In real app, this would delete the task via API
+    // Delete functionality could be added later
     console.log('Deleting task:', taskId)
   }
 
@@ -232,9 +304,56 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Tasks List */}
-      <div className="space-y-4">
-        {filteredTasks.map((task, index) => {
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-red-600">{error}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={refreshTasks}
+            className="mt-2"
+          >
+            Try Again
+          </Button>
+        </div>
+      )}
+
+      {/* Loading State */}
+      {loading ? (
+        <div className="space-y-4">
+          {[1, 2, 3].map(i => (
+            <Card key={i} className="p-6">
+              <div className="animate-pulse">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-gray-200 rounded-full"></div>
+                  <div className="flex-1">
+                    <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+                    <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <>
+          {/* Tasks List */}
+          <div className="space-y-4">
+            {filteredTasks.length === 0 ? (
+              <Card className="p-8 text-center">
+                <p className="text-brand-mid-gray">No tasks found matching your criteria.</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={refreshTasks}
+                  className="mt-2"
+                >
+                  Refresh Tasks
+                </Button>
+              </Card>
+            ) : (
+              filteredTasks.map((task, index) => {
           const IconComponent = typeIcons[task.type]
           return (
             <motion.div
@@ -319,17 +438,10 @@ export default function TasksPage() {
               </Card>
             </motion.div>
           )
-        })}
-      </div>
-
-      {filteredTasks.length === 0 && (
-        <div className="text-center py-12">
-          <Clock className="mx-auto h-12 w-12 text-brand-mid-gray mb-4" />
-          <h3 className="text-lg font-medium text-brand-dark mb-2">No tasks found</h3>
-          <p className="text-brand-mid-gray">
-            {searchTerm ? `No results for "${searchTerm}"` : 'Try adjusting your filters or create a new task.'}
-          </p>
+            })
+          )}
         </div>
+        </>
       )}
     </div>
   )

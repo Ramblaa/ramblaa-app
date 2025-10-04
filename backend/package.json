@@ -1,7 +1,7 @@
 {
   "name": "rambley-api",
   "version": "1.0.0",
-  "description": "Backend API for Rambley application",
+  "description": "Backend API for Ramble application",
   "main": "server.js",
   "type": "module",
   "scripts": {

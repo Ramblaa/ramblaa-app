@@ -1,21 +1,21 @@
 /**
- * Google Apps Script integration for sending aiResponse data to Rambley webhook
+ * Google Apps Script integration for sending aiResponse data to Ramble webhook
  * 
  * Setup Instructions:
  * 1. Open your Google Sheets with aiResponse data
  * 2. Go to Extensions > Apps Script
  * 3. Replace the default code with this script
  * 4. Set the following script properties (Script Editor > Project Settings > Script Properties):
- *    - WEBHOOK_URL: Your Rambley webhook endpoint (e.g., https://your-app.railway.app/api/webhook/google-sheets-messages)
+ *    - WEBHOOK_URL: Your Ramble webhook endpoint (e.g., https://your-app.railway.app/api/webhook/google-sheets-messages)
  *    - WEBHOOK_API_KEY: Your webhook API key
- *    - ACCOUNT_ID: Your Rambley account ID (usually 1 for demo account)
+ *    - ACCOUNT_ID: Your Ramble account ID (usually 1 for demo account)
  * 5. Save and authorize the script
  * 6. Test with sendTestData() function
  * 7. Use sendLatestAiResponse() to send the most recent row
  */
 
 /**
- * Send aiResponse data to Rambley webhook
+ * Send aiResponse data to Ramble webhook
  * @param {Object} data - The data object to send
  * @returns {Object} Response from the webhook
  */
@@ -316,7 +316,7 @@ function onAiResponseEdit() {
  */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
-  ui.createMenu('Rambley Webhook')
+  ui.createMenu('Ramble Webhook')
     .addItem('Send Latest Row', 'sendLatestAiResponse')
     .addItem('Send Test Data', 'sendTestData')
     .addItem('Setup Auto-Webhook', 'setupAutoWebhook')

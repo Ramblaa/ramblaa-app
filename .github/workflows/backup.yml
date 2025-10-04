@@ -39,7 +39,7 @@ jobs:
       run: |
         DATE=$(date +%Y%m%d_%H%M%S)
         {
-          echo "Rambley Repository Health Report - $DATE"
+          echo "Ramble Repository Health Report - $DATE"
           echo "=================================================="
           echo ""
           echo "Repository Status:"

@@ -1,4 +1,4 @@
-# 🚀 Rambley
+# 🚀 Ramble
 
 A modern admin dashboard application with real user authentication.
 

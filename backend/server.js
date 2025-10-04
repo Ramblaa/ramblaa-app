@@ -93,6 +93,6 @@ app.use('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Rambley API server running on port ${PORT}`);
+  console.log(`🚀 Ramble API server running on port ${PORT}`);
   console.log(`🔗 CORS origin: ${process.env.CORS_ORIGIN || 'http://localhost:5173'}`);
 }); 

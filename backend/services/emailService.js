@@ -65,7 +65,7 @@ class EmailService {
       <html>
       <head>
         <meta charset="utf-8">
-        <title>Verify Your Email - Rambley</title>
+        <title>Verify Your Email - Ramble</title>
         <style>
           body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
@@ -125,13 +125,13 @@ class EmailService {
       <body>
         <div class="header">
           <div class="logo">R</div>
-          <h1 style="margin: 0;">Welcome to Rambley!</h1>
+          <h1 style="margin: 0;">Welcome to Ramble!</h1>
         </div>
         
         <div class="content">
           <p>Hi ${firstName},</p>
           
-          <p>Thanks for signing up for Rambley! To complete your account setup and start managing your property communications, please verify your email address.</p>
+          <p>Thanks for signing up for Ramble! To complete your account setup and start managing your property communications, please verify your email address.</p>
           
           <div style="text-align: center;">
             <a href="${verificationUrl}" class="button">Verify Email Address</a>
@@ -142,13 +142,13 @@ class EmailService {
           
           <p><strong>This verification link will expire in 24 hours.</strong></p>
           
-          <p>If you didn't create an account with Rambley, you can safely ignore this email.</p>
+          <p>If you didn't create an account with Ramble, you can safely ignore this email.</p>
           
-          <p>Best regards,<br>The Rambley Team</p>
+          <p>Best regards,<br>The Ramble Team</p>
         </div>
         
         <div class="footer">
-          <p>© 2025 Rambley. All rights reserved.</p>
+          <p>© 2025 Ramble. All rights reserved.</p>
           <p>This is an automated email. Please do not reply to this message.</p>
         </div>
       </body>
@@ -158,22 +158,22 @@ class EmailService {
     const textContent = `
       Hi ${firstName},
 
-      Thanks for signing up for Rambley! To complete your account setup, please verify your email address.
+      Thanks for signing up for Ramble! To complete your account setup, please verify your email address.
 
       Click here to verify: ${verificationUrl}
 
       This verification link will expire in 24 hours.
 
-      If you didn't create an account with Rambley, you can safely ignore this email.
+      If you didn't create an account with Ramble, you can safely ignore this email.
 
       Best regards,
-      The Rambley Team
+      The Ramble Team
     `;
 
     const mailOptions = {
       from: process.env.FROM_EMAIL || 'noreply@rambley.com',
       to: email,
-      subject: 'Verify Your Email Address - Rambley',
+      subject: 'Verify Your Email Address - Ramble',
       text: textContent,
       html: htmlContent,
     };
@@ -206,7 +206,7 @@ class EmailService {
       <html>
       <head>
         <meta charset="utf-8">
-        <title>Welcome to Rambley!</title>
+        <title>Welcome to Ramble!</title>
         <style>
           body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
@@ -255,25 +255,25 @@ class EmailService {
       <body>
         <div class="header">
           <div class="logo">R</div>
-          <h1 style="margin: 0;">Welcome to Rambley!</h1>
+          <h1 style="margin: 0;">Welcome to Ramble!</h1>
         </div>
         
         <div class="content">
           <p>Hi ${firstName},</p>
           
-          <p>🎉 Congratulations! Your email has been verified and your Rambley account is now active.</p>
+          <p>🎉 Congratulations! Your email has been verified and your Ramble account is now active.</p>
           
-          <p>You can now sign in and start managing your property communications with ease. Rambley helps you streamline guest interactions and automate responses to make hosting simpler.</p>
+          <p>You can now sign in and start managing your property communications with ease. Ramble helps you streamline guest interactions and automate responses to make hosting simpler.</p>
           
           <p>Ready to get started? <a href="${process.env.FRONTEND_URL || 'http://localhost:5174'}" style="color: #8B5CF6;">Sign in to your account</a></p>
           
           <p>If you have any questions, feel free to reach out to our support team.</p>
           
-          <p>Best regards,<br>The Rambley Team</p>
+          <p>Best regards,<br>The Ramble Team</p>
         </div>
         
         <div class="footer">
-          <p>© 2025 Rambley. All rights reserved.</p>
+          <p>© 2025 Ramble. All rights reserved.</p>
         </div>
       </body>
       </html>
@@ -282,7 +282,7 @@ class EmailService {
     const mailOptions = {
       from: process.env.FROM_EMAIL || 'noreply@rambley.com',
       to: email,
-      subject: 'Welcome to Rambley - Account Verified!',
+      subject: 'Welcome to Ramble - Account Verified!',
       html: htmlContent,
     };
 
