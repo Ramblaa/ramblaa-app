@@ -39,9 +39,13 @@ async function start() {
     await initDatabase();
     console.log('[DB] Database initialized');
 
+    // Railway provides PORT env var - use it directly
+    const port = process.env.PORT || 3001;
     const host = '0.0.0.0';
-    app.listen(config.server.port, host, () => {
-      console.log(`[Server] Running on ${host}:${config.server.port}`);
+    console.log(`[Server] PORT env var: ${process.env.PORT}`);
+    
+    app.listen(port, host, () => {
+      console.log(`[Server] Running on ${host}:${port}`);
       console.log(`[Server] Environment: ${config.server.nodeEnv}`);
     });
   } catch (error) {
