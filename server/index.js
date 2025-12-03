@@ -39,8 +39,9 @@ async function start() {
     await initDatabase();
     console.log('[DB] Database initialized');
 
-    app.listen(config.server.port, () => {
-      console.log(`[Server] Running on port ${config.server.port}`);
+    const host = '0.0.0.0';
+    app.listen(config.server.port, host, () => {
+      console.log(`[Server] Running on ${host}:${config.server.port}`);
       console.log(`[Server] Environment: ${config.server.nodeEnv}`);
     });
   } catch (error) {
