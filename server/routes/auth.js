@@ -192,17 +192,17 @@ router.post('/signup', [
     // Hash password
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Create user (inactive until verified)
+    // Create user (auto-activate for now until email service is configured)
     const id = crypto.randomUUID();
     await db.prepare(
       `INSERT INTO users (id, email, password_hash, first_name, last_name, role, is_active, email_verified, email_verification_token, email_verification_expires) 
-       VALUES (?, ?, ?, ?, ?, 'user', false, false, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, 'user', true, true, ?, ?)`
     ).run([id, email, passwordHash, firstName, lastName, verificationToken, verificationExpires]);
 
-    // TODO: Send verification email
+    // TODO: Send verification email when email service is configured
 
     res.status(201).json({
-      message: 'Account created successfully! Please check your email to verify your account.',
+      message: 'Account created successfully!',
       user: {
         id,
         email,
