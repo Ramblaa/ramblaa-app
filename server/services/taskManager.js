@@ -1,0 +1,564 @@
+/**
+ * Task Manager Service - Ported from guestResponse.gs
+ * Handles task creation, workflow, and completion
+ */
+
+import { v4 as uuidv4 } from 'uuid';
+import { getDbWithPrepare as getDb } from '../db/index.js';
+import { chatJSON, callGPTTurbo, detectLanguage } from './openai.js';
+import { sendWhatsAppMessage } from './twilio.js';
+import { fillTemplate } from '../utils/templateFiller.js';
+import {
+  PROMPT_TASK_TRIAGE,
+  PROMPT_GUEST_REQUIREMENTS_EVAL,
+  PROMPT_GUEST_INFO_REQUEST,
+  PROMPT_STAFF_INFO_REQUEST,
+  PROMPT_HOST_ESCALATION,
+  PROMPT_GUEST_TASK_COMPLETED,
+  PROMPT_TASK_BOOLEAN_EVAL_SYSTEM,
+  PROMPT_TASK_BOOLEAN_EVAL_USER,
+} from '../prompts/index.js';
+
+/**
+ * Create tasks from AI logs where task is required
+ * Equivalent to createStaffTasks() from guestResponse.gs
+ */
+export async function createTasksFromAiLogs() {
+  const db = getDb();
+  const created = [];
+
+  // Get AI logs that need task creation
+  const logs = db.prepare(`
+    SELECT * FROM ai_logs 
+    WHERE task_required = 1 AND task_created = 0 AND recipient_type = 'Guest'
+    ORDER BY created_at ASC
+  `).all();
+
+  for (const log of logs) {
+    if (!log.task_bucket) continue;
+
+    // Check for existing open task with same bucket
+    const existing = db.prepare(`
+      SELECT id FROM tasks 
+      WHERE phone = ? AND property_id = ? AND task_bucket = ? AND status != 'Completed'
+      LIMIT 1
+    `).get(log.to_number, log.property_id, log.task_bucket);
+
+    if (existing) {
+      // Update the existing task reference
+      db.prepare(`UPDATE ai_logs SET task_created = 1, task_id = ? WHERE id = ?`)
+        .run(existing.id, log.id);
+      continue;
+    }
+
+    // Get task definition
+    const taskDef = db.prepare(`
+      SELECT * FROM task_definitions 
+      WHERE property_id = ? AND sub_category_name = ?
+      LIMIT 1
+    `).get(log.property_id, log.task_bucket);
+
+    // Create new task
+    const taskId = uuidv4();
+    const task = {
+      id: taskId,
+      property_id: log.property_id,
+      booking_id: log.booking_id,
+      phone: log.to_number,
+      guest_message: log.original_message,
+      action_title: log.original_message,
+      task_bucket: log.task_bucket,
+      sub_category: log.task_bucket,
+      task_request_title: log.task_request_title || log.original_message,
+      task_json: taskDef?.details_json || '',
+      staff_id: taskDef?.staff_id || '',
+      staff_name: taskDef?.staff_name || '',
+      staff_phone: taskDef?.staff_phone || '',
+      staff_requirements: taskDef?.staff_requirements || '',
+      guest_requirements: taskDef?.guest_requirements || '',
+      host_escalation: taskDef?.host_escalation || '',
+      action_holder: taskDef?.guest_requirements ? 'Guest' : 'Staff',
+      action_holder_phone: taskDef?.guest_requirements ? log.to_number : (taskDef?.staff_phone || ''),
+      status: taskDef?.guest_requirements ? 'Waiting on Guest' : 'Waiting on Staff',
+      message_chain_ids: log.message_bundle_id || '',
+    };
+
+    const stmt = db.prepare(`
+      INSERT INTO tasks (
+        id, property_id, booking_id, phone, guest_message, action_title,
+        task_bucket, sub_category, task_request_title, task_json,
+        staff_id, staff_name, staff_phone, staff_requirements, guest_requirements,
+        host_escalation, action_holder, action_holder_phone, status, message_chain_ids
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      task.id, task.property_id, task.booking_id, task.phone,
+      task.guest_message, task.action_title, task.task_bucket, task.sub_category,
+      task.task_request_title, task.task_json, task.staff_id, task.staff_name,
+      task.staff_phone, task.staff_requirements, task.guest_requirements,
+      task.host_escalation, task.action_holder, task.action_holder_phone,
+      task.status, task.message_chain_ids
+    );
+
+    // Update AI log
+    db.prepare(`UPDATE ai_logs SET task_created = 1, task_id = ? WHERE id = ?`)
+      .run(taskId, log.id);
+
+    created.push(task);
+  }
+
+  return created;
+}
+
+/**
+ * Process task workflow - triage and send messages
+ * Equivalent to buildNextTaskMessage() from guestResponse.gs
+ */
+export async function processTaskWorkflow() {
+  const db = getDb();
+  const results = [];
+
+  // Get active tasks that need processing
+  const tasks = db.prepare(`
+    SELECT * FROM tasks 
+    WHERE status != 'Completed' AND completion_notified = 0
+    ORDER BY created_at ASC
+  `).all();
+
+  for (const task of tasks) {
+    const result = await processTask(task);
+    if (result) results.push(result);
+  }
+
+  return results;
+}
+
+/**
+ * Process a single task through triage
+ */
+async function processTask(task) {
+  const db = getDb();
+
+  // Check if task is completed
+  if (task.status === 'Completed') {
+    // Send completion notification if not already sent
+    if (!task.completion_notified) {
+      await sendCompletionNotification(task);
+      db.prepare(`UPDATE tasks SET completion_notified = 1 WHERE id = ?`).run(task.id);
+    }
+    return { task, action: 'completed' };
+  }
+
+  // Check if we're waiting for a response
+  const hasKickoff = task.ai_message_response && task.ai_message_response.length > 0;
+  const responseReceived = task.response_received === 1;
+
+  if (hasKickoff && !responseReceived) {
+    // Still waiting for response, skip
+    return { task, action: 'waiting' };
+  }
+
+  // Run triage
+  const lang = await detectLanguage(task.guest_message || task.ongoing_conversation || '');
+  
+  // Evaluate guest requirements first
+  let guestSatisfied = { satisfiedAll: false, missingItems: [], providedItems: [] };
+  if (task.guest_requirements) {
+    guestSatisfied = await evaluateGuestRequirements(
+      task.guest_requirements,
+      task.ongoing_conversation || '[]'
+    );
+  }
+
+  // Run triage prompt
+  const triageResult = await runTriage(task);
+
+  // Determine action holder
+  let actionHolder = triageResult.actionHolder || 'Staff';
+  
+  if (triageResult.hostNeeded) {
+    actionHolder = 'Host';
+  } else if (guestSatisfied.satisfiedAll) {
+    actionHolder = 'Staff';
+  } else if (guestSatisfied.missingItems.length > 0) {
+    actionHolder = 'Guest';
+  }
+
+  // Handle based on action holder
+  let result = { task, action: actionHolder.toLowerCase() };
+
+  if (actionHolder === 'Host') {
+    await handleHostPath(task, triageResult, lang);
+    db.prepare(`UPDATE tasks SET action_holder = 'Host', status = 'Waiting on Host' WHERE id = ?`)
+      .run(task.id);
+  } else if (actionHolder === 'Guest') {
+    await handleGuestPath(task, guestSatisfied.missingItems, lang);
+    db.prepare(`UPDATE tasks SET action_holder = 'Guest', status = 'Waiting on Guest' WHERE id = ?`)
+      .run(task.id);
+  } else {
+    await handleStaffPath(task, triageResult, lang);
+    db.prepare(`UPDATE tasks SET action_holder = 'Staff', status = 'Waiting on Staff' WHERE id = ?`)
+      .run(task.id);
+  }
+
+  return result;
+}
+
+/**
+ * Evaluate guest requirements from conversation thread
+ */
+async function evaluateGuestRequirements(requirements, thread) {
+  const prompt = fillTemplate(PROMPT_GUEST_REQUIREMENTS_EVAL, {
+    GUEST_REQUIREMENTS: requirements || '(none)',
+    THREAD: thread || '[]',
+  });
+
+  const result = await chatJSON(prompt);
+
+  if (result.error || !result.json) {
+    return { satisfiedAll: false, missingItems: [], providedItems: [] };
+  }
+
+  return {
+    satisfiedAll: result.json.satisfied_all === true,
+    missingItems: Array.isArray(result.json.missing_items) ? result.json.missing_items : [],
+    providedItems: Array.isArray(result.json.provided_items) ? result.json.provided_items : [],
+  };
+}
+
+/**
+ * Run triage prompt
+ */
+async function runTriage(task) {
+  const prompt = fillTemplate(PROMPT_TASK_TRIAGE, {
+    TASK_SCOPE: task.task_bucket || task.sub_category || 'Task',
+    HOST_ESCALATION_CRITERIA: task.host_escalation || '',
+    GUEST_REQUIREMENTS: task.guest_requirements || '',
+    STAFF_REQUIREMENTS: task.staff_requirements || '',
+    STAFF_CONVERSATION: task.ongoing_conversation || '',
+    GUEST_MESSAGE: task.guest_message || '',
+  });
+
+  const result = await chatJSON(prompt);
+
+  if (result.error || !result.json) {
+    return { hostNeeded: false, actionHolder: 'Staff' };
+  }
+
+  return {
+    hostNeeded: result.json.hostNeeded || result.json.host_escalation_needed || false,
+    hostReason: result.json.hostReason || result.json.host_reason || '',
+    guestMissing: result.json.guestMissing || [],
+    staffMissing: result.json.staffMissing || [],
+    actionHolder: result.json.actionHolder || result.json.action_holder || 'Staff',
+  };
+}
+
+/**
+ * Handle Host escalation path
+ */
+async function handleHostPath(task, triageResult, lang) {
+  const db = getDb();
+
+  // Get host phone
+  let hostPhone = '';
+  if (task.property_id) {
+    const property = db.prepare('SELECT host_phone FROM properties WHERE id = ?').get(task.property_id);
+    hostPhone = property?.host_phone || '';
+  }
+
+  if (!hostPhone) return;
+
+  // Generate host message
+  const prompt = fillTemplate(PROMPT_HOST_ESCALATION, {
+    LANG: lang,
+    TASK_SCOPE: task.task_bucket || 'Task',
+    HOST_ESCALATION_REQUIREMENTS: task.host_escalation || '',
+    STAFF_REQUIREMENTS: task.staff_requirements || '',
+    GUEST_REQUIREMENTS: task.guest_requirements || '',
+    GUEST_MESSAGE: task.guest_message || '',
+    THREAD_CONTEXT: task.ongoing_conversation || '',
+    BOOKING_DETAILS_JSON: '',
+    PROPERTY_DETAILS_JSON: '',
+  });
+
+  let message = await callGPTTurbo([{ role: 'user', content: prompt }]);
+  if (!message) return;
+
+  // Ensure Host: prefix
+  if (!/^Host:/i.test(message)) {
+    message = 'Host: ' + message;
+  }
+
+  // Send message
+  await sendWhatsAppMessage({
+    to: hostPhone,
+    body: message,
+    recipientType: 'Host',
+    metadata: {
+      propertyId: task.property_id,
+      taskId: task.id,
+    },
+  });
+
+  // Update task
+  db.prepare(`
+    UPDATE tasks SET 
+      ai_message_response = ?, 
+      action_holder_phone = ?,
+      action_holder_notified = 1,
+      host_notified = 1
+    WHERE id = ?
+  `).run(message, hostPhone, task.id);
+}
+
+/**
+ * Handle Guest info request path
+ */
+async function handleGuestPath(task, missingItems, lang) {
+  const db = getDb();
+
+  const prompt = fillTemplate(PROMPT_GUEST_INFO_REQUEST, {
+    LANG: lang,
+    TASK_SCOPE: task.task_bucket || 'Task',
+    GUEST_REQUIREMENTS: missingItems.join('; ') || task.guest_requirements || '',
+    THREAD_CONTEXT: task.ongoing_conversation || '',
+  });
+
+  const message = await callGPTTurbo([{ role: 'user', content: prompt }]);
+  if (!message) return;
+
+  // Send message
+  await sendWhatsAppMessage({
+    to: task.phone,
+    body: message,
+    recipientType: 'Guest',
+    metadata: {
+      propertyId: task.property_id,
+      taskId: task.id,
+    },
+  });
+
+  // Update task
+  db.prepare(`
+    UPDATE tasks SET 
+      ai_message_response = ?, 
+      action_holder_phone = ?,
+      action_holder_notified = 1,
+      action_holder_missing_requirements = ?
+    WHERE id = ?
+  `).run(message, task.phone, missingItems.join('; '), task.id);
+}
+
+/**
+ * Handle Staff info request path
+ */
+async function handleStaffPath(task, triageResult, lang) {
+  const db = getDb();
+
+  if (!task.staff_phone) return;
+
+  const staffName = task.staff_name?.split(' ')[0] || 'there';
+
+  const prompt = fillTemplate(PROMPT_STAFF_INFO_REQUEST, {
+    STAFF_LANG: lang,
+    STAFF_NAME: staffName,
+    TASK_SCOPE: task.task_bucket || 'Task',
+    STAFF_REQUIREMENTS: task.staff_requirements || '(none)',
+    GUEST_CONTEXT: task.guest_message || '',
+    THREAD_CONTEXT: task.ongoing_conversation || '',
+    LATEST_STAFF_INBOUND: '',
+    BOOKING_DETAILS_JSON: '',
+    PROPERTY_DETAILS_JSON: '',
+  });
+
+  let message = await callGPTTurbo([{ role: 'user', content: prompt }]);
+  if (!message) return;
+
+  // Ensure Staff: prefix with greeting
+  if (!/^Staff:/i.test(message)) {
+    message = `Staff: Hi ${staffName} — ${message}`;
+  }
+
+  // Send message
+  await sendWhatsAppMessage({
+    to: task.staff_phone,
+    body: message,
+    recipientType: 'Staff',
+    metadata: {
+      propertyId: task.property_id,
+      taskId: task.id,
+    },
+  });
+
+  // Update task
+  db.prepare(`
+    UPDATE tasks SET 
+      ai_message_response = ?, 
+      action_holder_phone = ?,
+      action_holder_notified = 1,
+      action_holder_missing_requirements = ?
+    WHERE id = ?
+  `).run(message, task.staff_phone, task.staff_requirements || '', task.id);
+}
+
+/**
+ * Send task completion notification to guest
+ */
+async function sendCompletionNotification(task) {
+  const lang = await detectLanguage(task.guest_message || '');
+
+  const prompt = fillTemplate(PROMPT_GUEST_TASK_COMPLETED, {
+    LANG: lang,
+    TASK_SCOPE: task.task_bucket || 'Task',
+    GUEST_MESSAGE: task.guest_message || '',
+    THREAD_CONTEXT: task.ongoing_conversation || '',
+    TASK_JSON: task.task_json || '',
+  });
+
+  const message = await callGPTTurbo([{ role: 'user', content: prompt }]);
+  if (!message) return;
+
+  await sendWhatsAppMessage({
+    to: task.phone,
+    body: message,
+    recipientType: 'Guest',
+    metadata: {
+      propertyId: task.property_id,
+      taskId: task.id,
+    },
+  });
+}
+
+/**
+ * Evaluate if task requirements are met
+ * Equivalent to evaluateTaskStatus() from guestResponse.gs
+ */
+export async function evaluateTaskStatus() {
+  const db = getDb();
+  const updates = [];
+
+  const tasks = db.prepare(`
+    SELECT * FROM tasks 
+    WHERE status != 'Completed' AND response_received = 1
+  `).all();
+
+  for (const task of tasks) {
+    if (!task.staff_requirements || !task.ongoing_conversation) continue;
+
+    const systemPrompt = PROMPT_TASK_BOOLEAN_EVAL_SYSTEM;
+    const userPrompt = fillTemplate(PROMPT_TASK_BOOLEAN_EVAL_USER, {
+      REQUIREMENTS: task.staff_requirements,
+      STAFF_MESSAGE: task.ongoing_conversation,
+    });
+
+    try {
+      const response = await callGPTTurbo([
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ]);
+
+      const isComplete = response.trim().toUpperCase() === 'TRUE';
+
+      if (isComplete) {
+        db.prepare(`UPDATE tasks SET status = 'Completed' WHERE id = ?`).run(task.id);
+        updates.push({ taskId: task.id, status: 'Completed' });
+      }
+    } catch (error) {
+      console.error(`[TaskManager] Eval error for task ${task.id}:`, error.message);
+    }
+  }
+
+  return updates;
+}
+
+/**
+ * Archive completed tasks
+ * Equivalent to archiveCompletedTasks() from guestResponse.gs
+ */
+export async function archiveCompletedTasks() {
+  const db = getDb();
+
+  const completed = db.prepare(`
+    SELECT * FROM tasks WHERE status = 'Completed'
+  `).all();
+
+  for (const task of completed) {
+    // Insert into archive
+    db.prepare(`
+      INSERT INTO task_archive (
+        id, property_id, booking_id, phone, guest_message, action_title,
+        task_bucket, sub_category, task_json, staff_id, staff_name, status,
+        completed_at, original_task_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+    `).run(
+      task.id, task.property_id, task.booking_id, task.phone,
+      task.guest_message, task.action_title, task.task_bucket,
+      task.sub_category, task.task_json, task.staff_id, task.staff_name,
+      task.status, JSON.stringify(task)
+    );
+
+    // Delete from active tasks
+    db.prepare(`DELETE FROM tasks WHERE id = ?`).run(task.id);
+  }
+
+  return completed.length;
+}
+
+/**
+ * Get all active tasks
+ */
+export function getActiveTasks(filters = {}) {
+  const db = getDb();
+  
+  let sql = 'SELECT * FROM tasks WHERE 1=1';
+  const params = [];
+
+  if (filters.propertyId) {
+    sql += ' AND property_id = ?';
+    params.push(filters.propertyId);
+  }
+
+  if (filters.status) {
+    sql += ' AND status = ?';
+    params.push(filters.status);
+  }
+
+  sql += ' ORDER BY created_at DESC';
+
+  return db.prepare(sql).all(...params);
+}
+
+/**
+ * Get task by ID
+ */
+export function getTaskById(taskId) {
+  const db = getDb();
+  return db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+}
+
+/**
+ * Update task
+ */
+export function updateTask(taskId, updates) {
+  const db = getDb();
+  
+  const fields = Object.keys(updates);
+  const setClause = fields.map(f => `${f} = ?`).join(', ');
+  const sql = `UPDATE tasks SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
+  
+  db.prepare(sql).run(...Object.values(updates), taskId);
+  return getTaskById(taskId);
+}
+
+export default {
+  createTasksFromAiLogs,
+  processTaskWorkflow,
+  evaluateTaskStatus,
+  archiveCompletedTasks,
+  getActiveTasks,
+  getTaskById,
+  updateTask,
+};
+

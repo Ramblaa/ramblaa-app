@@ -1,0 +1,406 @@
+/**
+ * Message Processor Service - Ported from guestResponse.gs
+ * Core AI pipeline for processing inbound messages
+ * 
+ * KEY CHANGE: No consolidation - each intent processed and sent individually
+ */
+
+import { v4 as uuidv4 } from 'uuid';
+import { getDbWithPrepare as getDb } from '../db/index.js';
+import { chatJSON, callGPTTurbo, detectLanguage } from './openai.js';
+import { sendWhatsAppMessage } from './twilio.js';
+import { fillTemplate } from '../utils/templateFiller.js';
+import {
+  PROMPT_SUMMARIZE_MESSAGE_ACTIONS,
+  PROMPT_AI_RESPONSE_FROM_SUMMARY,
+  PROMPT_ENRICHMENT_CLASSIFY_JSON,
+} from '../prompts/index.js';
+
+/**
+ * Process a single inbound message through the AI pipeline
+ * Equivalent to the combined flow of processSummarizeMessage + buildAiResponseFromSummaries
+ * 
+ * @param {Object} message - The inbound message record
+ * @returns {Array} - Array of generated responses (one per intent)
+ */
+export async function processInboundMessage(message) {
+  const db = getDb();
+  const responses = [];
+
+  try {
+    // 1. Get context (booking, property, FAQs, history)
+    const context = await getMessageContext(message);
+
+    // 2. Summarize message into action titles
+    const summary = await summarizeMessage(message.body, context.history);
+    if (!summary || !summary.actionTitles?.length) {
+      console.log('[MessageProcessor] No actionable items found');
+      return responses;
+    }
+
+    // 3. Process each action title individually (NO CONSOLIDATION)
+    for (const actionTitle of summary.actionTitles) {
+      const response = await processActionTitle({
+        actionTitle,
+        message,
+        context,
+        summary,
+      });
+
+      if (response) {
+        responses.push(response);
+
+        // 4. Send immediately (each intent as individual message)
+        if (response.aiResponse && message.from_number) {
+          await sendWhatsAppMessage({
+            to: message.from_number,
+            body: response.aiResponse,
+            recipientType: 'Guest',
+            metadata: {
+              propertyId: context.propertyId,
+              bookingId: context.bookingId,
+              aiEnrichmentId: response.id,
+              referenceMessageIds: message.id,
+            },
+          });
+
+          // Update status to sent
+          db.prepare(`UPDATE ai_logs SET status = 'Sent', sent_status = 1 WHERE id = ?`)
+            .run(response.id);
+        }
+      }
+    }
+
+    return responses;
+  } catch (error) {
+    console.error('[MessageProcessor] Error:', error.message);
+    return responses;
+  }
+}
+
+/**
+ * Summarize message into action titles
+ * Equivalent to processSummarizeMessage() from guestResponse.gs
+ */
+async function summarizeMessage(messageBody, history = '[]') {
+  const prompt = fillTemplate(PROMPT_SUMMARIZE_MESSAGE_ACTIONS, {
+    HISTORICAL_MESSAGES: history,
+    MESSAGE: messageBody,
+  });
+
+  const result = await chatJSON(prompt);
+  
+  if (result.error || !result.json) {
+    console.error('[MessageProcessor] Summarize error:', result.error);
+    return null;
+  }
+
+  const data = result.json;
+  return {
+    language: data.Language || 'en',
+    tone: data.Tone || '',
+    sentiment: data.Sentiment || '',
+    actionTitles: Array.isArray(data['Action Titles']) 
+      ? data['Action Titles'].filter(Boolean) 
+      : [],
+  };
+}
+
+/**
+ * Process a single action title through enrichment and response generation
+ * Equivalent to buildAiResponseFromSummaries() for one action
+ */
+async function processActionTitle({ actionTitle, message, context, summary }) {
+  const db = getDb();
+  const id = uuidv4();
+
+  // Get category lists for this property
+  const { faqsList, tasksList } = getCategoryLists(context.propertyId);
+
+  // Build enrichment prompt
+  const prompt = fillTemplate(PROMPT_AI_RESPONSE_FROM_SUMMARY, {
+    LANG: summary.language || 'en',
+    ACTION_TITLE: actionTitle,
+    HISTORICAL_MESSAGES: context.history || '[]',
+    BOOKING_DETAILS_JSON: context.bookingJson || '(none)',
+    PROPERTY_DETAILS_JSON: context.propertyJson || '(none)',
+    PROP_FAQS_JSON: context.faqsJson || '[]',
+    FAQS_LIST: faqsList || 'Other',
+    TASK_LIST: tasksList || 'Other',
+    SUMMARY_JSON: JSON.stringify({
+      Language: summary.language,
+      Tone: summary.tone,
+      Sentiment: summary.sentiment,
+    }),
+  });
+
+  const result = await chatJSON(prompt);
+
+  if (result.error || !result.json) {
+    console.error('[MessageProcessor] Enrichment error:', result.error);
+    return null;
+  }
+
+  const data = result.json;
+
+  // Build response record
+  const response = {
+    id,
+    recipientType: 'Guest',
+    propertyId: context.propertyId,
+    bookingId: context.bookingId,
+    toNumber: message.from_number,
+    messageBundleId: message.id,
+    originalMessage: actionTitle,
+    availablePropertyKnowledge: data.AvailablePropertyKnowledge === 'Yes',
+    propertyKnowledgeCategory: data.PropertyKnowledgeCategory || '',
+    taskRequired: data.TaskRequired === true,
+    taskBucket: data.TaskBucket || '',
+    taskRequestTitle: data.TaskRequestTitle || '',
+    urgencyIndicators: data.UrgencyIndicators || 'None',
+    escalationRiskIndicators: data.EscalationRiskIndicators || 'None',
+    aiResponse: data.AiResponse || '',
+    ticketEnrichmentJson: JSON.stringify(data),
+    status: 'Pending',
+  };
+
+  // Insert into ai_logs
+  const stmt = db.prepare(`
+    INSERT INTO ai_logs (
+      id, recipient_type, property_id, booking_id, to_number, message_bundle_id,
+      original_message, available_property_knowledge, property_knowledge_category,
+      task_required, task_bucket, task_request_title, urgency_indicators,
+      escalation_risk_indicators, ai_message_response, ticket_enrichment_json, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  stmt.run(
+    response.id,
+    response.recipientType,
+    response.propertyId,
+    response.bookingId,
+    response.toNumber,
+    response.messageBundleId,
+    response.originalMessage,
+    response.availablePropertyKnowledge ? 1 : 0,
+    response.propertyKnowledgeCategory,
+    response.taskRequired ? 1 : 0,
+    response.taskBucket,
+    response.taskRequestTitle,
+    response.urgencyIndicators,
+    response.escalationRiskIndicators,
+    response.aiResponse,
+    response.ticketEnrichmentJson,
+    response.status
+  );
+
+  return response;
+}
+
+/**
+ * Get context for message processing (booking, property, FAQs, history)
+ */
+async function getMessageContext(message) {
+  const db = getDb();
+  
+  let bookingId = message.booking_id;
+  let propertyId = message.property_id;
+
+  // Try to lookup booking by phone if not set
+  if (!bookingId && message.from_number) {
+    const booking = lookupBookingByPhone(message.from_number);
+    if (booking) {
+      bookingId = booking.id;
+      propertyId = propertyId || booking.property_id;
+    }
+  }
+
+  // Get booking JSON
+  let bookingJson = '(none)';
+  if (bookingId) {
+    const booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(bookingId);
+    if (booking) {
+      bookingJson = booking.details_json || JSON.stringify(booking);
+    }
+  }
+
+  // Get property JSON
+  let propertyJson = '(none)';
+  if (propertyId) {
+    const property = db.prepare('SELECT * FROM properties WHERE id = ?').get(propertyId);
+    if (property) {
+      propertyJson = property.details_json || JSON.stringify(property);
+    }
+  }
+
+  // Get FAQs
+  let faqsJson = '[]';
+  if (propertyId) {
+    const faqs = db.prepare('SELECT * FROM faqs WHERE property_id = ?').all(propertyId);
+    if (faqs.length) {
+      faqsJson = JSON.stringify(faqs.map(f => ({
+        'Sub-Category Name': f.sub_category_name,
+        Description: f.description,
+        Details: f.details_json ? JSON.parse(f.details_json) : {},
+      })));
+    }
+  }
+
+  // Get conversation history
+  let history = '[]';
+  const phone = message.from_number;
+  if (phone) {
+    const messages = db.prepare(`
+      SELECT body, message_type, requestor_role, created_at
+      FROM messages
+      WHERE (from_number = ? OR to_number = ?)
+      ORDER BY created_at DESC
+      LIMIT 20
+    `).all(phone, phone);
+
+    if (messages.length) {
+      const historyArr = messages.reverse().map(m => {
+        const role = m.requestor_role || (m.message_type === 'Inbound' ? 'Guest' : 'Host');
+        const direction = m.message_type || 'Inbound';
+        return `${role} - ${direction} - ${m.body}`;
+      });
+      history = JSON.stringify(historyArr);
+    }
+  }
+
+  return {
+    bookingId,
+    propertyId,
+    bookingJson,
+    propertyJson,
+    faqsJson,
+    history,
+  };
+}
+
+/**
+ * Lookup booking by guest phone number
+ */
+function lookupBookingByPhone(phone) {
+  const db = getDb();
+  
+  // Normalize phone for comparison
+  const normalizedPhone = phone.replace(/^whatsapp:/i, '').replace(/[^\d+]/g, '');
+  
+  const now = new Date().toISOString().split('T')[0];
+  
+  // Try active booking first
+  let booking = db.prepare(`
+    SELECT * FROM bookings 
+    WHERE guest_phone LIKE ? 
+    AND start_date <= ? AND end_date >= ?
+    ORDER BY start_date DESC
+    LIMIT 1
+  `).get(`%${normalizedPhone.slice(-10)}%`, now, now);
+
+  if (booking) return booking;
+
+  // Try upcoming booking
+  booking = db.prepare(`
+    SELECT * FROM bookings 
+    WHERE guest_phone LIKE ? 
+    AND start_date >= ?
+    ORDER BY start_date ASC
+    LIMIT 1
+  `).get(`%${normalizedPhone.slice(-10)}%`, now);
+
+  if (booking) return booking;
+
+  // Try most recent past booking
+  booking = db.prepare(`
+    SELECT * FROM bookings 
+    WHERE guest_phone LIKE ? 
+    ORDER BY end_date DESC
+    LIMIT 1
+  `).get(`%${normalizedPhone.slice(-10)}%`);
+
+  return booking;
+}
+
+/**
+ * Get FAQ and task category lists for a property
+ */
+function getCategoryLists(propertyId) {
+  const db = getDb();
+
+  let faqsList = 'Other';
+  let tasksList = 'Other';
+
+  if (propertyId) {
+    const faqs = db.prepare(`
+      SELECT DISTINCT sub_category_name FROM faqs WHERE property_id = ?
+    `).all(propertyId);
+    
+    if (faqs.length) {
+      faqsList = faqs.map(f => f.sub_category_name).join(', ');
+    }
+
+    const tasks = db.prepare(`
+      SELECT DISTINCT sub_category_name FROM task_definitions WHERE property_id = ?
+    `).all(propertyId);
+
+    if (tasks.length) {
+      tasksList = tasks.map(t => t.sub_category_name).join(', ');
+    }
+  }
+
+  return { faqsList, tasksList };
+}
+
+/**
+ * Process pending AI log entries and send messages
+ * Called periodically or after batch processing
+ */
+export async function processPendingAiLogs() {
+  const db = getDb();
+
+  // Get all pending entries
+  const pending = db.prepare(`
+    SELECT * FROM ai_logs 
+    WHERE status = 'Pending' AND sent_status = 0 AND ai_message_response IS NOT NULL
+    ORDER BY created_at ASC
+  `).all();
+
+  if (!pending.length) return [];
+
+  const results = [];
+
+  // Process each entry individually (NO CONSOLIDATION)
+  for (const entry of pending) {
+    if (!entry.to_number || !entry.ai_message_response) continue;
+
+    const result = await sendWhatsAppMessage({
+      to: entry.to_number,
+      body: entry.ai_message_response,
+      recipientType: entry.recipient_type || 'Guest',
+      metadata: {
+        propertyId: entry.property_id,
+        bookingId: entry.booking_id,
+        aiEnrichmentId: entry.id,
+        taskId: entry.task_id,
+      },
+    });
+
+    // Update status
+    const newStatus = result.success ? 'Sent' : 'Error';
+    db.prepare(`UPDATE ai_logs SET status = ?, sent_status = ? WHERE id = ?`)
+      .run(newStatus, result.success ? 1 : 0, entry.id);
+
+    results.push({ entry, result });
+  }
+
+  return results;
+}
+
+export default {
+  processInboundMessage,
+  processPendingAiLogs,
+  lookupBookingByPhone,
+  getCategoryLists,
+};
+
