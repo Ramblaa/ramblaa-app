@@ -21,9 +21,9 @@ export const config = {
     whatsappNumber: process.env.TWILIO_WHATSAPP_NUMBER || 'whatsapp:+14155238886',
   },
 
-  // Database
+  // Database (PostgreSQL)
   database: {
-    url: process.env.DATABASE_URL || './data/ramble.db',
+    url: process.env.DATABASE_URL,
   },
 
   // Server
