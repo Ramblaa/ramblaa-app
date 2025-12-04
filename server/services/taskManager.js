@@ -64,17 +64,60 @@ export async function createTasksFromAiLogs() {
       continue;
     }
 
-    // Get task definition to find assigned staff
-    const taskDef = await db.prepare(`
+    // Get task definition to find assigned staff using FLEXIBLE matching
+    // Try multiple strategies: exact match -> contains match -> keyword match
+    let taskDef = null;
+    const bucket = log.task_bucket || '';
+    
+    console.log(`[TaskManager] Looking for task definition: property=${log.property_id}, bucket="${bucket}"`);
+    
+    // Strategy 1: Exact match
+    taskDef = await db.prepare(`
       SELECT * FROM task_definitions 
-      WHERE property_id = ? AND sub_category_name = ?
+      WHERE property_id = ? AND LOWER(sub_category_name) = LOWER(?)
       LIMIT 1
-    `).get(log.property_id, log.task_bucket);
+    `).get(log.property_id, bucket);
+    
+    if (!taskDef && bucket) {
+      // Strategy 2: Task definition name contained in bucket (e.g., "Fresh Towels" in "Fresh Towels request")
+      taskDef = await db.prepare(`
+        SELECT * FROM task_definitions 
+        WHERE property_id = ? AND LOWER(?) LIKE '%' || LOWER(sub_category_name) || '%'
+        LIMIT 1
+      `).get(log.property_id, bucket);
+    }
+    
+    if (!taskDef && bucket) {
+      // Strategy 3: Bucket contained in task definition name
+      taskDef = await db.prepare(`
+        SELECT * FROM task_definitions 
+        WHERE property_id = ? AND LOWER(sub_category_name) LIKE '%' || LOWER(?) || '%'
+        LIMIT 1
+      `).get(log.property_id, bucket);
+    }
+    
+    if (!taskDef && bucket) {
+      // Strategy 4: First word match (e.g., "Fresh" matches "Fresh Towels")
+      const firstWord = bucket.split(/\s+/)[0];
+      if (firstWord && firstWord.length > 3) {
+        taskDef = await db.prepare(`
+          SELECT * FROM task_definitions 
+          WHERE property_id = ? AND LOWER(sub_category_name) LIKE LOWER(?) || '%'
+          LIMIT 1
+        `).get(log.property_id, firstWord);
+      }
+    }
 
     if (taskDef) {
-      console.log(`[TaskManager] Found task definition: ${taskDef.sub_category_name}, staff: ${taskDef.staff_name}`);
+      console.log(`[TaskManager] ✓ Found task definition: "${taskDef.sub_category_name}" for bucket "${bucket}"`);
+      console.log(`[TaskManager]   Staff: ${taskDef.staff_name} (${taskDef.staff_phone})`);
     } else {
-      console.log(`[TaskManager] No task definition found for bucket: ${log.task_bucket}`);
+      console.log(`[TaskManager] ✗ No task definition found for bucket: "${bucket}" in property ${log.property_id}`);
+      // List available task definitions for debugging
+      const available = await db.prepare(`
+        SELECT sub_category_name FROM task_definitions WHERE property_id = ?
+      `).all(log.property_id);
+      console.log(`[TaskManager]   Available definitions:`, available?.map(t => t.sub_category_name) || 'none');
     }
 
     // Create new task with UUID
@@ -141,22 +184,41 @@ export async function processTaskWorkflow() {
 
   // Get active tasks that need processing (INTEGER: 0=false, 1=true)
   // IMPORTANT: Skip tasks that have already notified their action holder
+  // ALSO: Skip broken/hallucinated tasks (wifi, directions, taxi, Other bucket)
   const tasks = await db.prepare(`
     SELECT * FROM tasks 
     WHERE status != 'Completed' 
+    AND status != 'Cancelled'
     AND (completion_notified = 0 OR completion_notified IS NULL)
     AND (action_holder_notified = 0 OR action_holder_notified IS NULL)
+    AND task_bucket IS NOT NULL
+    AND task_bucket != ''
+    AND task_bucket != 'Other'
+    AND LOWER(task_bucket) NOT LIKE '%wifi%'
+    AND LOWER(task_bucket) NOT LIKE '%wi-fi%'
+    AND LOWER(task_bucket) NOT LIKE '%direction%'
+    AND LOWER(task_bucket) NOT LIKE '%taxi%'
     ORDER BY created_at ASC
   `).all();
 
   if (!tasks || !tasks.length) {
-    console.log('[TaskManager] No tasks to process (all notified or completed)');
+    console.log('[TaskManager] No valid tasks to process');
     return results;
   }
 
-  console.log(`[TaskManager] Processing ${tasks.length} active tasks`);
+  console.log(`[TaskManager] Processing ${tasks.length} valid tasks`);
 
   for (const task of tasks) {
+    // Double-check task has required data
+    if (!task.property_id) {
+      console.log(`[TaskManager] Skipping task ${task.id} - no property_id`);
+      continue;
+    }
+    if (!task.staff_phone && task.action_holder === 'Staff') {
+      console.log(`[TaskManager] Skipping task ${task.id} - no staff phone for Staff action holder`);
+      continue;
+    }
+    
     const result = await processTask(task);
     if (result) results.push(result);
   }
