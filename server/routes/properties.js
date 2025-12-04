@@ -269,6 +269,75 @@ router.post('/:id/bookings', async (req, res) => {
   }
 });
 
+/**
+ * PUT /api/properties/:id/bookings/:bookingId
+ * Update a booking
+ */
+router.put('/:id/bookings/:bookingId', async (req, res) => {
+  try {
+    const { id: propertyId, bookingId } = req.params;
+    const { guestName, guestPhone, guestEmail, startDate, endDate, details } = req.body;
+    const db = getDb();
+
+    const existing = await db.prepare('SELECT * FROM bookings WHERE id = ? AND property_id = ?').get(bookingId, propertyId);
+    if (!existing) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    await db.prepare(`
+      UPDATE bookings 
+      SET guest_name = ?, guest_phone = ?, guest_email = ?, start_date = ?, end_date = ?, details_json = ?
+      WHERE id = ?
+    `).run(
+      guestName || existing.guest_name,
+      guestPhone !== undefined ? guestPhone : existing.guest_phone,
+      guestEmail !== undefined ? guestEmail : existing.guest_email,
+      startDate || existing.start_date,
+      endDate || existing.end_date,
+      details ? JSON.stringify(details) : existing.details_json,
+      bookingId
+    );
+
+    const updated = await db.prepare('SELECT * FROM bookings WHERE id = ?').get(bookingId);
+    res.json({
+      id: updated.id,
+      propertyId: updated.property_id,
+      guestName: updated.guest_name,
+      guestPhone: updated.guest_phone,
+      guestEmail: updated.guest_email,
+      startDate: updated.start_date,
+      endDate: updated.end_date,
+      details: updated.details_json ? JSON.parse(updated.details_json) : {},
+      createdAt: updated.created_at,
+    });
+  } catch (error) {
+    console.error('[Bookings] Update error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/properties/:id/bookings/:bookingId
+ * Delete a booking
+ */
+router.delete('/:id/bookings/:bookingId', async (req, res) => {
+  try {
+    const { id: propertyId, bookingId } = req.params;
+    const db = getDb();
+
+    const existing = await db.prepare('SELECT * FROM bookings WHERE id = ? AND property_id = ?').get(bookingId, propertyId);
+    if (!existing) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    await db.prepare('DELETE FROM bookings WHERE id = ?').run(bookingId);
+    res.json({ success: true, id: bookingId });
+  } catch (error) {
+    console.error('[Bookings] Delete error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============================================================================
 // FAQS
 // ============================================================================
@@ -457,6 +526,73 @@ router.post('/:id/staff', async (req, res) => {
     res.status(201).json(staff);
   } catch (error) {
     console.error('[Staff] Create error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PUT /api/properties/:id/staff/:staffId
+ * Update a staff member
+ */
+router.put('/:id/staff/:staffId', async (req, res) => {
+  try {
+    const { id: propertyId, staffId } = req.params;
+    const { name, phone, role, preferredLanguage, details } = req.body;
+    const db = getDb();
+
+    const existing = await db.prepare('SELECT * FROM staff WHERE id = ? AND property_id = ?').get(staffId, propertyId);
+    if (!existing) {
+      return res.status(404).json({ error: 'Staff member not found' });
+    }
+
+    await db.prepare(`
+      UPDATE staff 
+      SET name = ?, phone = ?, role = ?, preferred_language = ?, details_json = ?
+      WHERE id = ?
+    `).run(
+      name || existing.name,
+      phone || existing.phone,
+      role || existing.role,
+      preferredLanguage || existing.preferred_language,
+      details ? JSON.stringify(details) : existing.details_json,
+      staffId
+    );
+
+    const updated = await db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId);
+    res.json({
+      id: updated.id,
+      propertyId: updated.property_id,
+      name: updated.name,
+      phone: updated.phone,
+      role: updated.role,
+      preferredLanguage: updated.preferred_language,
+      details: updated.details_json ? JSON.parse(updated.details_json) : {},
+      createdAt: updated.created_at,
+    });
+  } catch (error) {
+    console.error('[Staff] Update error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/properties/:id/staff/:staffId
+ * Delete a staff member
+ */
+router.delete('/:id/staff/:staffId', async (req, res) => {
+  try {
+    const { id: propertyId, staffId } = req.params;
+    const db = getDb();
+
+    const existing = await db.prepare('SELECT * FROM staff WHERE id = ? AND property_id = ?').get(staffId, propertyId);
+    if (!existing) {
+      return res.status(404).json({ error: 'Staff member not found' });
+    }
+
+    await db.prepare('DELETE FROM staff WHERE id = ?').run(staffId);
+    res.json({ success: true, id: staffId });
+  } catch (error) {
+    console.error('[Staff] Delete error:', error);
     res.status(500).json({ error: error.message });
   }
 });

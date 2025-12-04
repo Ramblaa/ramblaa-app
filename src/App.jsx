@@ -8,7 +8,8 @@ import TaskDetailPage from './pages/TaskDetailPage'
 import EscalationsPage from './pages/EscalationsPage'
 import ResourcesPage from './pages/ResourcesPage'
 import PropertiesPage from './pages/PropertiesPage'
-import ContactsPage from './pages/ContactsPage'
+import StaffPage from './pages/StaffPage'
+import BookingsPage from './pages/BookingsPage'
 import PromptPage from './pages/PromptPage'
 import SettingsPage from './pages/SettingsPage'
 import SandboxPage from './pages/SandboxPage'
@@ -61,7 +62,9 @@ function AppContent() {
                 <Route path="/resources" element={<ResourcesPage />} />
                 <Route path="/faqs" element={<Navigate to="/resources" replace />} />
                 <Route path="/properties" element={<PropertiesPage />} />
-                <Route path="/contacts" element={<ContactsPage />} />
+                <Route path="/bookings" element={<BookingsPage />} />
+                <Route path="/staff" element={<StaffPage />} />
+                <Route path="/contacts" element={<Navigate to="/staff" replace />} />
                 <Route path="/prompt" element={<PromptPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>
