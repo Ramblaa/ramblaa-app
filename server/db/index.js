@@ -67,9 +67,9 @@ class PreparedStatement {
     this.sql = sql;
   }
 
-  async get(params = []) {
+  async get(...params) {
     try {
-      const flatParams = Array.isArray(params) ? params : [params];
+      const flatParams = params.flat();
       const result = await this.pool.query(this.sql, flatParams);
       return result.rows[0] || undefined;
     } catch (e) {
