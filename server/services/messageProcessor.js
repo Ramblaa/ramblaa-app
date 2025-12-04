@@ -101,6 +101,8 @@ async function summarizeMessage(messageBody, history = '[]') {
   });
 
   console.log('[MessageProcessor] Calling AI for summarization...');
+  console.log('[MessageProcessor] Message to summarize:', messageBody);
+  
   const result = await chatJSON(prompt);
   
   if (result.error || !result.json) {
@@ -109,15 +111,30 @@ async function summarizeMessage(messageBody, history = '[]') {
   }
 
   const data = result.json;
-  console.log('[MessageProcessor] Summarized:', JSON.stringify(data));
+  const actionTitles = Array.isArray(data['Action Titles']) 
+    ? data['Action Titles'].filter(Boolean) 
+    : [];
+  
+  console.log('[MessageProcessor] Input message:', messageBody);
+  console.log('[MessageProcessor] AI returned actions:', actionTitles.join(', '));
+  
+  // Sanity check - warn if AI returns actions not related to the message
+  const lowerMessage = messageBody.toLowerCase();
+  for (const action of actionTitles) {
+    const lowerAction = action.toLowerCase();
+    if (lowerAction.includes('direction') && !lowerMessage.includes('direction')) {
+      console.warn('[MessageProcessor] WARNING: AI returned "directions" action but message does not mention directions!');
+    }
+    if (lowerAction.includes('wifi') && !lowerMessage.includes('wifi') && !lowerMessage.includes('wi-fi')) {
+      console.warn('[MessageProcessor] WARNING: AI returned "wifi" action but message does not mention WiFi!');
+    }
+  }
   
   return {
     language: data.Language || 'en',
     tone: data.Tone || '',
     sentiment: data.Sentiment || '',
-    actionTitles: Array.isArray(data['Action Titles']) 
-      ? data['Action Titles'].filter(Boolean) 
-      : [],
+    actionTitles,
   };
 }
 

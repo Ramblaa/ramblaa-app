@@ -83,36 +83,32 @@ Your output **must be a single, valid JSON object** matching the schema below �
 // ============================================================================
 
 export const PROMPT_SUMMARIZE_MESSAGE_ACTIONS = `
-You receive one or more guest messages PLUS recent conversation history.
+You are extracting action items from a guest message. Your ONLY job is to identify what the guest is asking for.
 
-Your job is to extract the ACTUAL requests from the CURRENT message. Read the message carefully and identify what the guest is ACTUALLY asking for.
+READ THIS MESSAGE CAREFULLY:
+{{MESSAGE}}
 
-Return STRICT JSON:
+Now extract what the guest ACTUALLY asked for. Return STRICT JSON:
 {
-  "Language": "<ISO 639-1 code like en, es, id>",
-  "Tone": "<Friendly|Polite|Formal|Casual|Frustrated|Neutral>",
+  "Language": "<2-letter ISO code>",
+  "Tone": "<Friendly|Polite|Casual|Frustrated|Neutral>",
   "Sentiment": "<Positive|Neutral|Negative>",
-  "Action Titles": [
-    // Extract 1-5 action titles from the CURRENT message ONLY
-    // Use the EXACT wording from the guest's message where possible
-    // Examples: "Need fresh sheets", "Check-in time question", "Pool needs cleaning"
-  ]
+  "Action Titles": ["<extracted action 1>", "<extracted action 2 if any>"]
 }
 
-CRITICAL RULES:
-- Extract actions from the CURRENT message text ONLY. Do NOT use examples from this prompt.
-- Use the guest's ACTUAL words. If they say "fresh sheets", use "Fresh sheets request", not something else.
-- If asking about check-in/check-out times, use "Check-in time inquiry" or similar - NOT a made-up task.
-- Questions about WiFi, amenities, rules = inquiries (not tasks).
-- Requests for physical items (towels, linens, cleaning) = task requests.
-- Ignore greetings, thank yous, acknowledgements - focus on actionable requests only.
-- NEVER copy the examples from this prompt. Analyze the actual message.
+CRITICAL - READ CAREFULLY:
+1. ONLY extract actions that appear in the message above
+2. If message says "fresh towels" → action is "Fresh towels request"
+3. If message says "wifi" or "WiFi" → action is "WiFi inquiry"
+4. If message says "check-in" → action is "Check-in inquiry"
+5. Do NOT invent actions - only extract what's in the message
+6. Maximum 3 actions per message
+7. Ignore greetings like "Hi there"
 
-History (JSON array of strings, for context only):
+DO NOT OUTPUT: "Request directions to villa", "Request directions", or any action not in the message.
+
+History (context only, do not extract from this):
 {{HISTORICAL_MESSAGES}}
-
-Current message to analyze:
-{{MESSAGE}}
 `;
 
 // ============================================================================
