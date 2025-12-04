@@ -92,6 +92,140 @@ router.get('/', async (req, res) => {
   }
 });
 
+// ============================================================================
+// UTILITY ROUTES - Must be defined BEFORE /:id to avoid matching
+// ============================================================================
+
+/**
+ * GET /api/tasks/ai-logs
+ * Check AI logs to debug task creation
+ */
+router.get('/ai-logs', async (req, res) => {
+  try {
+    const db = getDb();
+    const logs = await db.prepare(`
+      SELECT id, message, task_bucket, task_required, task_created, task_uuid,
+             property_id, booking_id, to_number, recipient_type, created_at
+      FROM ai_logs
+      ORDER BY created_at DESC
+      LIMIT 20
+    `).all();
+    
+    res.json({
+      count: logs.length,
+      logs,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/tasks/force-create
+ * Force task creation from pending AI logs
+ */
+router.post('/force-create', async (req, res) => {
+  try {
+    const { createTasksFromAiLogs } = await import('../services/taskManager.js');
+    console.log('[Tasks] Force creating tasks from AI logs...');
+    const created = await createTasksFromAiLogs();
+    res.json({
+      success: true,
+      created: created.length,
+      tasks: created.map(t => ({
+        id: t.id,
+        bucket: t.task_bucket,
+        staff: t.staff_name,
+        property: t.property_id,
+      })),
+    });
+  } catch (error) {
+    console.error('[Tasks] Force create error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/tasks/cleanup
+ * Clean up old broken tasks from previous buggy runs
+ */
+router.post('/cleanup', async (req, res) => {
+  try {
+    const db = getDb();
+    
+    // First, get the tasks that will be deleted
+    const toDelete = await db.prepare(`
+      SELECT id, action_title, task_bucket, status, created_at
+      FROM tasks
+      WHERE action_title ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%'])
+         OR task_bucket ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%', 'Other'])
+    `).all();
+    
+    console.log(`[Tasks] Found ${toDelete.length} broken tasks to clean up`);
+    
+    // Delete the broken tasks
+    await db.prepare(`
+      DELETE FROM tasks
+      WHERE action_title ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%'])
+         OR task_bucket ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%', 'Other'])
+    `).run();
+    
+    // Also clean up related ai_logs entries
+    await db.prepare(`
+      UPDATE ai_logs 
+      SET task_created = 0, task_uuid = NULL
+      WHERE task_bucket ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%', 'Other'])
+    `).run();
+    
+    console.log(`[Tasks] Cleaned up ${toDelete.length} broken tasks`);
+    
+    res.json({
+      success: true,
+      deletedCount: toDelete.length,
+      deletedTasks: toDelete,
+    });
+  } catch (error) {
+    console.error('[Tasks] Cleanup error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/tasks/cancel-all
+ * Cancel all incomplete tasks (for fresh start)
+ */
+router.post('/cancel-all', async (req, res) => {
+  try {
+    const db = getDb();
+    
+    // Get tasks that will be cancelled
+    const toCancel = await db.prepare(`
+      SELECT id, action_title, status FROM tasks WHERE status != 'Completed'
+    `).all();
+    
+    // Mark all incomplete tasks as cancelled
+    await db.prepare(`
+      UPDATE tasks SET status = 'Cancelled', action_holder_notified = 1, completion_notified = 1
+      WHERE status != 'Completed'
+    `).run();
+    
+    console.log(`[Tasks] Cancelled ${toCancel.length} tasks`);
+    
+    res.json({
+      success: true,
+      cancelledCount: toCancel.length,
+      cancelledTasks: toCancel,
+    });
+  } catch (error) {
+    console.error('[Tasks] Cancel-all error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================================
+// TASK DETAIL ROUTES - /:id must be LAST
+// ============================================================================
+
 /**
  * GET /api/tasks/:id
  * Get task details
@@ -516,143 +650,6 @@ router.get('/diagnostics', async (req, res) => {
     });
   } catch (error) {
     console.error('[Tasks] Diagnostics error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/tasks/ai-logs
- * Check AI logs to debug task creation
- */
-router.get('/ai-logs', async (req, res) => {
-  try {
-    const db = getDb();
-    const logs = await db.prepare(`
-      SELECT id, message, task_bucket, task_required, task_created, task_uuid,
-             property_id, booking_id, to_number, recipient_type, created_at
-      FROM ai_logs
-      ORDER BY created_at DESC
-      LIMIT 20
-    `).all();
-    
-    res.json({
-      count: logs.length,
-      logs,
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * POST /api/tasks/force-create
- * Force task creation from pending AI logs
- */
-router.post('/force-create', async (req, res) => {
-  try {
-    const { createTasksFromAiLogs } = await import('../services/taskManager.js');
-    console.log('[Tasks] Force creating tasks from AI logs...');
-    const created = await createTasksFromAiLogs();
-    res.json({
-      success: true,
-      created: created.length,
-      tasks: created.map(t => ({
-        id: t.id,
-        bucket: t.task_bucket,
-        staff: t.staff_name,
-        property: t.property_id,
-      })),
-    });
-  } catch (error) {
-    console.error('[Tasks] Force create error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * POST /api/tasks/cleanup
- * Clean up old broken tasks from previous buggy runs
- */
-router.post('/cleanup', async (req, res) => {
-  try {
-    const db = getDb();
-    
-    // Find and delete tasks with hallucinated action titles
-    const brokenPatterns = [
-      '%Wi-Fi%',
-      '%WiFi%',
-      '%wifi%',
-      '%direction%',
-      '%taxi%',
-      '%Request Wi%',
-      '%Request direction%',
-    ];
-    
-    // First, get the tasks that will be deleted
-    const toDelete = await db.prepare(`
-      SELECT id, action_title, task_bucket, status, created_at
-      FROM tasks
-      WHERE action_title ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%'])
-         OR task_bucket ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%', 'Other'])
-    `).all();
-    
-    console.log(`[Tasks] Found ${toDelete.length} broken tasks to clean up`);
-    
-    // Delete the broken tasks
-    const deleteResult = await db.prepare(`
-      DELETE FROM tasks
-      WHERE action_title ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%'])
-         OR task_bucket ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%', 'Other'])
-    `).run();
-    
-    // Also clean up related ai_logs entries
-    const aiLogsCleanup = await db.prepare(`
-      UPDATE ai_logs 
-      SET task_created = 0, task_uuid = NULL
-      WHERE task_bucket ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%', 'Other'])
-    `).run();
-    
-    console.log(`[Tasks] Cleaned up ${toDelete.length} broken tasks`);
-    
-    res.json({
-      success: true,
-      deletedCount: toDelete.length,
-      deletedTasks: toDelete,
-    });
-  } catch (error) {
-    console.error('[Tasks] Cleanup error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * POST /api/tasks/cancel-all
- * Cancel all incomplete tasks (for fresh start)
- */
-router.post('/cancel-all', async (req, res) => {
-  try {
-    const db = getDb();
-    
-    // Get tasks that will be cancelled
-    const toCanel = await db.prepare(`
-      SELECT id, action_title, status FROM tasks WHERE status != 'Completed'
-    `).all();
-    
-    // Mark all incomplete tasks as cancelled
-    await db.prepare(`
-      UPDATE tasks SET status = 'Cancelled', action_holder_notified = 1, completion_notified = 1
-      WHERE status != 'Completed'
-    `).run();
-    
-    console.log(`[Tasks] Cancelled ${toCanel.length} tasks`);
-    
-    res.json({
-      success: true,
-      cancelledCount: toCanel.length,
-      cancelledTasks: toCanel,
-    });
-  } catch (error) {
-    console.error('[Tasks] Cancel-all error:', error);
     res.status(500).json({ error: error.message });
   }
 });
