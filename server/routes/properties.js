@@ -47,12 +47,12 @@ router.get('/', async (req, res) => {
  * GET /api/properties/:id
  * Get property details
  */
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const property = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
+    const property = await db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
 
     if (!property) {
       return res.status(404).json({ error: 'Property not found' });
@@ -60,20 +60,20 @@ router.get('/:id', (req, res) => {
 
     // Get active bookings
     const today = new Date().toISOString().split('T')[0];
-    const bookings = db.prepare(`
+    const bookings = await db.prepare(`
       SELECT * FROM bookings 
       WHERE property_id = ? AND end_date >= ?
       ORDER BY start_date ASC
     `).all(id, today);
 
     // Get FAQs
-    const faqs = db.prepare('SELECT * FROM faqs WHERE property_id = ?').all(id);
+    const faqs = await db.prepare('SELECT * FROM faqs WHERE property_id = ?').all(id);
 
     // Get task definitions
-    const taskDefs = db.prepare('SELECT * FROM task_definitions WHERE property_id = ?').all(id);
+    const taskDefs = await db.prepare('SELECT * FROM task_definitions WHERE property_id = ?').all(id);
 
     // Get staff
-    const staff = db.prepare('SELECT * FROM staff WHERE property_id = ?').all(id);
+    const staff = await db.prepare('SELECT * FROM staff WHERE property_id = ?').all(id);
 
     res.json({
       ...property,
@@ -118,7 +118,7 @@ router.get('/:id', (req, res) => {
  * POST /api/properties
  * Create a new property
  */
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const db = getDb();
     const { name, address, hostPhone, hostName, details } = req.body;
@@ -129,7 +129,7 @@ router.post('/', (req, res) => {
 
     const id = uuidv4();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO properties (id, name, address, host_phone, host_name, details_json)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(
@@ -141,7 +141,7 @@ router.post('/', (req, res) => {
       details ? JSON.stringify(details) : null
     );
 
-    const property = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
+    const property = await db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
     res.status(201).json(property);
   } catch (error) {
     console.error('[Properties] Create error:', error);
@@ -153,13 +153,13 @@ router.post('/', (req, res) => {
  * PATCH /api/properties/:id
  * Update property
  */
-router.patch('/:id', (req, res) => {
+router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
     const db = getDb();
 
-    const existing = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
+    const existing = await db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
     if (!existing) {
       return res.status(404).json({ error: 'Property not found' });
     }
@@ -176,10 +176,10 @@ router.patch('/:id', (req, res) => {
     if (fields.length > 0) {
       fields.push('updated_at = CURRENT_TIMESTAMP');
       values.push(id);
-      db.prepare(`UPDATE properties SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+      await db.prepare(`UPDATE properties SET ${fields.join(', ')} WHERE id = ?`).run(...values);
     }
 
-    const property = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
+    const property = await db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
     res.json(property);
   } catch (error) {
     console.error('[Properties] Update error:', error);
@@ -195,7 +195,7 @@ router.patch('/:id', (req, res) => {
  * GET /api/properties/:id/bookings
  * Get bookings for a property
  */
-router.get('/:id/bookings', (req, res) => {
+router.get('/:id/bookings', async (req, res) => {
   try {
     const { id } = req.params;
     const { active } = req.query;
@@ -212,7 +212,7 @@ router.get('/:id/bookings', (req, res) => {
 
     sql += ' ORDER BY start_date DESC';
 
-    const bookings = db.prepare(sql).all(...params);
+    const bookings = await db.prepare(sql).all(...params);
 
     res.json(bookings.map(b => ({
       id: b.id,
@@ -338,12 +338,12 @@ router.post('/:id/faqs', async (req, res) => {
  * GET /api/properties/:id/staff
  * Get staff for a property
  */
-router.get('/:id/staff', (req, res) => {
+router.get('/:id/staff', async (req, res) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const staff = db.prepare('SELECT * FROM staff WHERE property_id = ?').all(id);
+    const staff = await db.prepare('SELECT * FROM staff WHERE property_id = ?').all(id);
 
     res.json(staff.map(s => ({
       id: s.id,
