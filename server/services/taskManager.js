@@ -29,10 +29,10 @@ export async function createTasksFromAiLogs() {
   const db = getDb();
   const created = [];
 
-  // Get AI logs that need task creation
+  // Get AI logs that need task creation (INTEGER columns: 1=true, 0=false)
   const logs = await db.prepare(`
     SELECT * FROM ai_logs 
-    WHERE task_required = true AND task_created = false AND recipient_type = 'Guest'
+    WHERE task_required = 1 AND task_created = 0 AND recipient_type = 'Guest'
     ORDER BY created_at ASC
   `).all();
 
@@ -59,7 +59,7 @@ export async function createTasksFromAiLogs() {
     if (existing) {
       // Update the existing task reference
       console.log(`[TaskManager] Linking to existing task ${existing.id}`);
-      await db.prepare(`UPDATE ai_logs SET task_created = true, task_uuid = ? WHERE id = ?`)
+      await db.prepare(`UPDATE ai_logs SET task_created = 1, task_uuid = ? WHERE id = ?`)
         .run(existing.id, log.id);
       continue;
     }
@@ -120,8 +120,8 @@ export async function createTasksFromAiLogs() {
       task.status, task.message_chain_ids
     );
 
-    // Update AI log with task reference
-    await db.prepare(`UPDATE ai_logs SET task_created = true, task_uuid = ? WHERE id = ?`)
+    // Update AI log with task reference (INTEGER: 1=true)
+    await db.prepare(`UPDATE ai_logs SET task_created = 1, task_uuid = ? WHERE id = ?`)
       .run(taskId, log.id);
 
     console.log(`[TaskManager] Task ${taskId} created, assigned to: ${task.staff_name || 'unassigned'}`);

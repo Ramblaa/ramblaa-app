@@ -19,7 +19,7 @@ export default function BookingsPage() {
   const [editForm, setEditForm] = useState({})
   const [showAddModal, setShowAddModal] = useState(false)
   const [selectedProperty, setSelectedProperty] = useState('')
-  const [showActiveOnly, setShowActiveOnly] = useState(true)
+  const [showActiveOnly, setShowActiveOnly] = useState(false)
   const [newBooking, setNewBooking] = useState({
     guestName: '',
     guestPhone: '',

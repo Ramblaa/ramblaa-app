@@ -201,9 +201,9 @@ async function processActionTitle({ actionTitle, message, context, summary }) {
     response.toNumber,
     response.messageBundleId,  // UUID of original message
     response.originalMessage,
-    response.availablePropertyKnowledge ? true : false,
+    response.availablePropertyKnowledge ? 1 : 0,  // INTEGER in schema
     response.propertyKnowledgeCategory,
-    response.taskRequired ? true : false,
+    response.taskRequired ? 1 : 0,  // INTEGER in schema
     response.taskBucket,
     response.taskRequestTitle,
     response.urgencyIndicators,
