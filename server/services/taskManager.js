@@ -200,6 +200,19 @@ export async function createTasksFromAiLogs() {
     await db.prepare(`UPDATE ai_logs SET task_created = 1, task_uuid = ? WHERE id = ?`)
       .run(taskId, log.id);
 
+    // Link the outbound message (the initial response to guest) with this task
+    // Find the outbound message that was sent for this ai_log and update its reference_task_ids
+    try {
+      await db.prepare(`
+        UPDATE messages 
+        SET reference_task_ids = COALESCE(reference_task_ids || ',', '') || ?
+        WHERE ai_enrichment_id = ? AND message_type = 'Outbound'
+      `).run(taskId, log.id);
+      console.log(`[TaskManager] Linked task ${taskId} to outbound message`);
+    } catch (linkErr) {
+      console.error(`[TaskManager] Failed to link task to message:`, linkErr.message);
+    }
+
     console.log(`[TaskManager] Task ${taskId} created, assigned to: ${task.staff_name || 'unassigned'}`);
     created.push(task);
   }
