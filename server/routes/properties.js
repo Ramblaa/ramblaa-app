@@ -277,12 +277,12 @@ router.post('/:id/bookings', async (req, res) => {
  * GET /api/properties/:id/faqs
  * Get FAQs for a property
  */
-router.get('/:id/faqs', (req, res) => {
+router.get('/:id/faqs', async (req, res) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const faqs = db.prepare('SELECT * FROM faqs WHERE property_id = ? ORDER BY sub_category_name').all(id);
+    const faqs = await db.prepare('SELECT * FROM faqs WHERE property_id = ? ORDER BY sub_category_name').all(id);
 
     res.json(faqs.map(f => ({
       id: f.id,
@@ -302,7 +302,7 @@ router.get('/:id/faqs', (req, res) => {
  * POST /api/properties/:id/faqs
  * Create an FAQ
  */
-router.post('/:id/faqs', (req, res) => {
+router.post('/:id/faqs', async (req, res) => {
   try {
     const { id: propertyId } = req.params;
     const { subCategory, description, details } = req.body;
@@ -312,19 +312,17 @@ router.post('/:id/faqs', (req, res) => {
       return res.status(400).json({ error: 'Missing required field: subCategory' });
     }
 
-    const stmt = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO faqs (property_id, sub_category_name, description, details_json)
-      VALUES (?, ?, ?, ?)
-    `);
-
-    const result = stmt.run(
+      VALUES (?, ?, ?, ?) RETURNING id
+    `).get(
       propertyId,
       subCategory,
       description || null,
       details ? JSON.stringify(details) : null
     );
 
-    const faq = db.prepare('SELECT * FROM faqs WHERE id = ?').get(result.lastInsertRowid);
+    const faq = await db.prepare('SELECT * FROM faqs WHERE id = ?').get(result?.id);
     res.status(201).json(faq);
   } catch (error) {
     console.error('[FAQs] Create error:', error);
