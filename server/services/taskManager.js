@@ -140,14 +140,17 @@ export async function processTaskWorkflow() {
   const results = [];
 
   // Get active tasks that need processing (INTEGER: 0=false, 1=true)
+  // IMPORTANT: Skip tasks that have already notified their action holder
   const tasks = await db.prepare(`
     SELECT * FROM tasks 
-    WHERE status != 'Completed' AND (completion_notified = 0 OR completion_notified IS NULL)
+    WHERE status != 'Completed' 
+    AND (completion_notified = 0 OR completion_notified IS NULL)
+    AND (action_holder_notified = 0 OR action_holder_notified IS NULL)
     ORDER BY created_at ASC
   `).all();
 
   if (!tasks || !tasks.length) {
-    console.log('[TaskManager] No tasks to process');
+    console.log('[TaskManager] No tasks to process (all notified or completed)');
     return results;
   }
 
@@ -179,6 +182,12 @@ async function processTask(task) {
     return { task, action: 'completed' };
   }
 
+  // Check if already notified (prevent duplicate notifications)
+  if (task.action_holder_notified === 1) {
+    console.log(`[TaskManager] Task ${task.id} already notified, skipping`);
+    return { task, action: 'already_notified' };
+  }
+
   // Check if we're waiting for a response
   const hasKickoff = task.ai_message_response && task.ai_message_response.length > 0;
   const responseReceived = task.response_received === 1 || task.response_received === true;
@@ -192,28 +201,19 @@ async function processTask(task) {
   // Run triage
   const lang = await detectLanguage(task.guest_message || task.ongoing_conversation || '');
   
-  // Evaluate guest requirements first
-  let guestSatisfied = { satisfiedAll: false, missingItems: [], providedItems: [] };
-  if (task.guest_requirements) {
-    guestSatisfied = await evaluateGuestRequirements(
-      task.guest_requirements,
-      task.ongoing_conversation || '[]'
-    );
-  }
-
-  // Run triage prompt
+  // Run triage prompt to check if host escalation is needed
   const triageResult = await runTriage(task);
 
-  // Determine action holder
-  let actionHolder = triageResult.actionHolder || 'Staff';
+  // Determine action holder - STAFF FIRST for most tasks
+  // Guest requirements are preferences, not blockers for staff notification
+  let actionHolder = 'Staff';
   
   if (triageResult.hostNeeded) {
+    // Only go to Host if escalation is truly needed
     actionHolder = 'Host';
-  } else if (guestSatisfied.satisfiedAll) {
-    actionHolder = 'Staff';
-  } else if (guestSatisfied.missingItems.length > 0) {
-    actionHolder = 'Guest';
   }
+  // Note: Guest requirements (like "preferred time") are collected AFTER staff is notified
+  // Staff can handle the task and coordinate timing with guest
 
   console.log(`[TaskManager] Task ${task.id} action holder: ${actionHolder}`);
 
@@ -224,11 +224,8 @@ async function processTask(task) {
     await handleHostPath(task, triageResult, lang);
     await db.prepare(`UPDATE tasks SET action_holder = 'Host', status = 'Waiting on Host' WHERE id = ?`)
       .run(task.id);
-  } else if (actionHolder === 'Guest') {
-    await handleGuestPath(task, guestSatisfied.missingItems, lang);
-    await db.prepare(`UPDATE tasks SET action_holder = 'Guest', status = 'Waiting on Guest' WHERE id = ?`)
-      .run(task.id);
   } else {
+    // Default: Notify staff immediately
     await handleStaffPath(task, triageResult, lang);
     await db.prepare(`UPDATE tasks SET action_holder = 'Staff', status = 'Waiting on Staff' WHERE id = ?`)
       .run(task.id);
