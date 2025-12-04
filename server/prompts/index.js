@@ -126,7 +126,12 @@ You will analyze ONE guest action only.
 Inputs:
 - Preferred Language (2-letter or BCP-47): {{LANG}}
 - Action Title: {{ACTION_TITLE}}
-- Historical Messages (to & from): {{HISTORICAL_MESSAGES}}
+
+===== CURRENT MESSAGE (this is what the guest just sent) =====
+{{CURRENT_MESSAGE}}
+===== END CURRENT MESSAGE =====
+
+- Historical Messages (previous conversation for context only): {{HISTORICAL_MESSAGES}}
 - Booking Details JSON: {{BOOKING_DETAILS_JSON}}
 - Property Details JSON: {{PROPERTY_DETAILS_JSON}}
 - Property FAQs JSON (array): {{PROP_FAQS_JSON}}
@@ -135,7 +140,10 @@ Inputs:
 - Summary JSON (from the summarizer): {{SUMMARY_JSON}}
 
 Rules:
-1) Focus ONLY on the provided Action Title. Do not mix other requests.
+1) Focus ONLY on the provided Action Title, which was extracted from the CURRENT MESSAGE above.
+   - The Action Title represents what the guest JUST requested
+   - Verify the Action Title matches content in the CURRENT MESSAGE
+   - Do not use historical messages to change or reinterpret the Action Title
 2) AvailablePropertyKnowledge = "Yes" ONLY if the action can be fully answered from Booking/Property/FAQs JSON. If staff action or missing info is needed → "No".
 3) PropertyKnowledgeCategory ∈ {"Booking Details","Property Details","Property FAQs","None"}. Use "None" if no source suffices.
 4) FAQCategory: set only when PropertyKnowledgeCategory == "Property FAQs". Pick the single best item from FAQs Available (exact text) or "".

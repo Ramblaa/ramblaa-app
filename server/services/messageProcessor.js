@@ -178,9 +178,11 @@ async function processActionTitle({ actionTitle, message, context, summary }) {
   const { faqsList, tasksList } = await getCategoryLists(context.propertyId);
 
   // Build enrichment prompt with all context variables
+  // CURRENT_MESSAGE is the message we're processing - helps AI focus on the right request
   const templateVars = {
     LANG: summary.language || 'en',
     ACTION_TITLE: actionTitle,
+    CURRENT_MESSAGE: message.body || '',  // The latest message being processed
     HISTORICAL_MESSAGES: context.history || '[]',
     BOOKING_DETAILS_JSON: context.bookingJson || '(none)',
     PROPERTY_DETAILS_JSON: context.propertyJson || '(none)',
