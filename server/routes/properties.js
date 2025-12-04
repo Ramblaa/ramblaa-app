@@ -235,7 +235,7 @@ router.get('/:id/bookings', (req, res) => {
  * POST /api/properties/:id/bookings
  * Create a booking
  */
-router.post('/:id/bookings', (req, res) => {
+router.post('/:id/bookings', async (req, res) => {
   try {
     const { id: propertyId } = req.params;
     const { guestName, guestPhone, guestEmail, startDate, endDate, details } = req.body;
@@ -247,7 +247,7 @@ router.post('/:id/bookings', (req, res) => {
 
     const id = uuidv4();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO bookings (id, property_id, guest_name, guest_phone, guest_email, start_date, end_date, details_json)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -261,7 +261,7 @@ router.post('/:id/bookings', (req, res) => {
       details ? JSON.stringify(details) : null
     );
 
-    const booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(id);
+    const booking = await db.prepare('SELECT * FROM bookings WHERE id = ?').get(id);
     res.status(201).json(booking);
   } catch (error) {
     console.error('[Bookings] Create error:', error);
