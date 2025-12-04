@@ -369,5 +369,88 @@ function getPriority(urgency) {
   return 'low';
 }
 
+/**
+ * GET /api/tasks/debug-logs
+ * Get debug AI logs for auditing
+ */
+router.get('/debug-logs', async (req, res) => {
+  try {
+    const db = getDb();
+    const { limit = 50, phase, function_name } = req.query;
+    
+    let sql = `
+      SELECT id, function_name, phase, prompt_label, 
+             SUBSTRING(prompt, 1, 500) as prompt_preview,
+             SUBSTRING(response, 1, 500) as response_preview,
+             parsed_json, task_scope, thread_info, created_at
+      FROM debug_ai_logs
+      WHERE 1=1
+    `;
+    const params = [];
+    
+    if (phase) {
+      sql += ` AND phase = $${params.length + 1}`;
+      params.push(phase);
+    }
+    if (function_name) {
+      sql += ` AND function_name = $${params.length + 1}`;
+      params.push(function_name);
+    }
+    
+    sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1}`;
+    params.push(parseInt(limit, 10));
+    
+    const logs = await db.prepare(sql).all(...params);
+    
+    res.json({
+      count: logs.length,
+      logs: logs.map(log => ({
+        ...log,
+        parsed_json: log.parsed_json ? safeJsonParse(log.parsed_json) : null,
+        thread_info: log.thread_info ? safeJsonParse(log.thread_info) : null,
+      })),
+    });
+  } catch (error) {
+    console.error('[Tasks] Debug logs error:', error);
+    res.status(500).json({ error: 'Failed to fetch debug logs' });
+  }
+});
+
+/**
+ * GET /api/tasks/debug-logs/:id
+ * Get full debug log entry
+ */
+router.get('/debug-logs/:id', async (req, res) => {
+  try {
+    const db = getDb();
+    const { id } = req.params;
+    
+    const log = await db.prepare(`
+      SELECT * FROM debug_ai_logs WHERE id = $1
+    `).get(id);
+    
+    if (!log) {
+      return res.status(404).json({ error: 'Log not found' });
+    }
+    
+    res.json({
+      ...log,
+      parsed_json: log.parsed_json ? safeJsonParse(log.parsed_json) : null,
+      thread_info: log.thread_info ? safeJsonParse(log.thread_info) : null,
+    });
+  } catch (error) {
+    console.error('[Tasks] Debug log detail error:', error);
+    res.status(500).json({ error: 'Failed to fetch debug log' });
+  }
+});
+
+function safeJsonParse(str) {
+  try {
+    return JSON.parse(str);
+  } catch {
+    return str;
+  }
+}
+
 export default router;
 

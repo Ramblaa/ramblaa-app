@@ -95,20 +95,43 @@ export async function processInboundMessage(message) {
  * Equivalent to processSummarizeMessage() from guestResponse.gs
  */
 async function summarizeMessage(messageBody, history = '[]') {
-  // NOTE: Using prompt version 2024-12-04-v3
-  const prompt = fillTemplate(PROMPT_SUMMARIZE_MESSAGE_ACTIONS, {
+  const db = getDb();
+  
+  // Build prompt with template variables
+  const templateVars = {
     HISTORICAL_MESSAGES: history,
     MESSAGE: messageBody,
-  });
+  };
+  const prompt = fillTemplate(PROMPT_SUMMARIZE_MESSAGE_ACTIONS, templateVars);
 
   console.log('[MessageProcessor] === SUMMARIZATION START ===');
   console.log('[MessageProcessor] Prompt version: 2024-12-04-v3');
   console.log('[MessageProcessor] Input message:', JSON.stringify(messageBody));
-  console.log('[MessageProcessor] Prompt (first 500 chars):', prompt.substring(0, 500));
   
   const result = await chatJSON(prompt);
   
   console.log('[MessageProcessor] AI raw response:', result.raw?.substring(0, 300));
+  
+  // AUDIT: Log to debug_ai_logs for full traceability
+  try {
+    await db.prepare(`
+      INSERT INTO debug_ai_logs (
+        function_name, phase, prompt_label, prompt, response, parsed_json, 
+        thread_info, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `).run(
+      'summarizeMessage',
+      'summarization',
+      'PROMPT_SUMMARIZE_MESSAGE_ACTIONS',
+      prompt,
+      result.raw || result.error || '',
+      result.json ? JSON.stringify(result.json) : '',
+      JSON.stringify({ message: messageBody, history: history.substring(0, 500) })
+    );
+    console.log('[MessageProcessor] Logged to debug_ai_logs');
+  } catch (logErr) {
+    console.error('[MessageProcessor] Failed to log to debug_ai_logs:', logErr.message);
+  }
   
   if (result.error || !result.json) {
     console.error('[MessageProcessor] Summarize error:', result.error);
@@ -164,8 +187,8 @@ async function processActionTitle({ actionTitle, message, context, summary }) {
   // Get category lists for this property
   const { faqsList, tasksList } = await getCategoryLists(context.propertyId);
 
-  // Build enrichment prompt
-  const prompt = fillTemplate(PROMPT_AI_RESPONSE_FROM_SUMMARY, {
+  // Build enrichment prompt with all context variables
+  const templateVars = {
     LANG: summary.language || 'en',
     ACTION_TITLE: actionTitle,
     HISTORICAL_MESSAGES: context.history || '[]',
@@ -179,10 +202,43 @@ async function processActionTitle({ actionTitle, message, context, summary }) {
       Tone: summary.tone,
       Sentiment: summary.sentiment,
     }),
-  });
+  };
+  const prompt = fillTemplate(PROMPT_AI_RESPONSE_FROM_SUMMARY, templateVars);
 
-  console.log('[MessageProcessor] Calling AI for enrichment & response...');
+  console.log('[MessageProcessor] === ENRICHMENT START ===');
+  console.log('[MessageProcessor] Action:', actionTitle);
+  console.log('[MessageProcessor] FAQs available:', faqsList);
+  console.log('[MessageProcessor] Tasks available:', tasksList);
+  console.log('[MessageProcessor] Calling AI for enrichment...');
+  
   const result = await chatJSON(prompt);
+
+  // AUDIT: Log enrichment to debug_ai_logs
+  try {
+    await db.prepare(`
+      INSERT INTO debug_ai_logs (
+        function_name, phase, prompt_label, prompt, response, parsed_json,
+        task_scope, thread_info, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `).run(
+      'processActionTitle',
+      'enrichment',
+      'PROMPT_AI_RESPONSE_FROM_SUMMARY',
+      prompt.substring(0, 10000), // Limit size for DB
+      result.raw || result.error || '',
+      result.json ? JSON.stringify(result.json) : '',
+      actionTitle,
+      JSON.stringify({
+        faqsList,
+        tasksList,
+        propertyId: context.propertyId,
+        bookingId: context.bookingId,
+      })
+    );
+    console.log('[MessageProcessor] Logged enrichment to debug_ai_logs');
+  } catch (logErr) {
+    console.error('[MessageProcessor] Failed to log enrichment:', logErr.message);
+  }
 
   if (result.error || !result.json) {
     console.error('[MessageProcessor] Enrichment error:', result.error);
@@ -191,6 +247,8 @@ async function processActionTitle({ actionTitle, message, context, summary }) {
 
   const data = result.json;
   console.log('[MessageProcessor] Enrichment result:', JSON.stringify(data));
+  console.log('[MessageProcessor] TaskRequired:', data.TaskRequired, 'TaskBucket:', data.TaskBucket);
+  console.log('[MessageProcessor] === ENRICHMENT END ===');
 
   // Build response record
   const response = {
