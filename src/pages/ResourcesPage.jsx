@@ -25,6 +25,9 @@ import { Label } from '../components/ui/label'
 import { cn } from '../lib/utils'
 import apiService from '../services/api'
 
+// Get API base URL from environment
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
+
 export default function ResourcesPage() {
   const [activeTab, setActiveTab] = useState('faqs')
   
@@ -104,8 +107,10 @@ function FAQsPanel() {
 
   const loadProperties = async () => {
     try {
-      const response = await fetch('/api/properties')
+      console.log('[Resources] Loading properties from:', `${API_BASE_URL}/properties`)
+      const response = await fetch(`${API_BASE_URL}/properties`)
       const data = await response.json()
+      console.log('[Resources] Properties loaded:', data.length)
       setProperties(data)
       if (data.length > 0) {
         setSelectedProperty(data[0].id)
@@ -118,8 +123,10 @@ function FAQsPanel() {
   const loadFAQs = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`/api/properties/${selectedProperty}/faqs`)
+      console.log('[Resources] Loading FAQs for property:', selectedProperty)
+      const response = await fetch(`${API_BASE_URL}/properties/${selectedProperty}/faqs`)
       const data = await response.json()
+      console.log('[Resources] FAQs loaded:', data.length)
       setFaqs(data)
       setError(null)
     } catch (err) {
@@ -135,7 +142,7 @@ function FAQsPanel() {
     
     try {
       setSaving(true)
-      const response = await fetch(`/api/properties/${selectedProperty}/faqs`, {
+      const response = await fetch(`${API_BASE_URL}/properties/${selectedProperty}/faqs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -347,8 +354,10 @@ function TaskDefinitionsPanel() {
 
   const loadProperties = async () => {
     try {
-      const response = await fetch('/api/properties')
+      console.log('[Resources] Loading properties for task defs')
+      const response = await fetch(`${API_BASE_URL}/properties`)
       const data = await response.json()
+      console.log('[Resources] Properties loaded:', data.length)
       setProperties(data)
       if (data.length > 0) {
         setSelectedProperty(data[0].id)
@@ -361,8 +370,10 @@ function TaskDefinitionsPanel() {
   const loadTaskDefs = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`/api/properties/${selectedProperty}/task-definitions`)
+      console.log('[Resources] Loading task definitions for property:', selectedProperty)
+      const response = await fetch(`${API_BASE_URL}/properties/${selectedProperty}/task-definitions`)
       const data = await response.json()
+      console.log('[Resources] Task definitions loaded:', data.length)
       setTaskDefs(data)
       setError(null)
     } catch (err) {
@@ -375,8 +386,10 @@ function TaskDefinitionsPanel() {
 
   const loadStaff = async () => {
     try {
-      const response = await fetch(`/api/properties/${selectedProperty}/staff`)
+      console.log('[Resources] Loading staff for property:', selectedProperty)
+      const response = await fetch(`${API_BASE_URL}/properties/${selectedProperty}/staff`)
       const data = await response.json()
+      console.log('[Resources] Staff loaded:', data.length)
       setStaff(data)
     } catch (err) {
       console.error('Error loading staff:', err)
@@ -407,7 +420,8 @@ function TaskDefinitionsPanel() {
     
     try {
       setSaving(true)
-      const response = await fetch(`/api/properties/${selectedProperty}/task-definitions`, {
+      console.log('[Resources] Creating task definition:', newTaskDef.subCategory)
+      const response = await fetch(`${API_BASE_URL}/properties/${selectedProperty}/task-definitions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -424,6 +438,7 @@ function TaskDefinitionsPanel() {
       })
       
       if (response.ok) {
+        console.log('[Resources] Task definition created successfully')
         await loadTaskDefs()
         setShowAddModal(false)
         setNewTaskDef({
