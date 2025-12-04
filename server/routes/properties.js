@@ -453,10 +453,11 @@ router.post('/:id/task-definitions', async (req, res) => {
       primaryCategory: req.body.primaryCategory || 'Other',
     };
 
-    const result = await db.prepare(`
+    // Insert the task definition
+    await db.prepare(`
       INSERT INTO task_definitions (property_id, sub_category_name, host_escalation, staff_requirements, guest_requirements, staff_id, staff_name, staff_phone, details_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
-    `).get(
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
       propertyId,
       subCategory,
       hostEscalation || null,
@@ -468,8 +469,12 @@ router.post('/:id/task-definitions', async (req, res) => {
       JSON.stringify(detailsObj)
     );
 
-    const taskDef = await db.prepare('SELECT * FROM task_definitions WHERE id = ?').get(result?.id);
-    res.status(201).json(taskDef);
+    // Fetch the most recently inserted task definition for this property
+    const taskDef = await db.prepare(
+      'SELECT * FROM task_definitions WHERE property_id = ? AND sub_category_name = ? ORDER BY id DESC LIMIT 1'
+    ).get(propertyId, subCategory);
+    
+    res.status(201).json(taskDef || { message: 'Task definition created' });
   } catch (error) {
     console.error('[TaskDefs] Create error:', error);
     res.status(500).json({ error: error.message });
