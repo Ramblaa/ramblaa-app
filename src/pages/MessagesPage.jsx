@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Phone, MessageCircle, Send, ArrowLeft, Bot, BotOff, User, CheckSquare, ExternalLink, Search, Loader2, Link2, Calendar } from 'lucide-react'
 import { Button } from '../components/ui/button'
@@ -26,6 +26,19 @@ export default function MessagesPage() {
   const [showBookingSelector, setShowBookingSelector] = useState(false)
   const [availableBookings, setAvailableBookings] = useState([])
   const [loadingBookings, setLoadingBookings] = useState(false)
+  
+  // Ref for scrolling to latest message
+  const messagesEndRef = useRef(null)
+
+  // Scroll to bottom of messages
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  // Auto-scroll when messages change or conversation switches
+  useEffect(() => {
+    scrollToBottom()
+  }, [conversationMessages])
 
   // Get display data - prefer loaded meta, fall back to selected conversation
   const displayData = {
@@ -498,6 +511,8 @@ export default function MessagesPage() {
                   </motion.div>
                 ))}
               </AnimatePresence>
+              {/* Scroll anchor - always scroll to this element */}
+              <div ref={messagesEndRef} />
             </div>
 
             {/* Message Input */}
