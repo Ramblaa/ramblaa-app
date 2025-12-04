@@ -267,17 +267,31 @@ async function getMessageContext(message) {
     }
   }
 
-  // Get conversation history
+  // Get conversation history - SCOPED TO BOOKING (like Airbnb)
   let history = '[]';
   const phone = message.from_number;
   if (phone) {
-    const messages = await db.prepare(`
-      SELECT body, message_type, requestor_role, created_at
-      FROM messages
-      WHERE (from_number = ? OR to_number = ?)
-      ORDER BY created_at DESC
-      LIMIT 20
-    `).all(phone, phone);
+    let messages;
+    
+    if (bookingId) {
+      // If we have a booking, only get messages for THIS booking
+      messages = await db.prepare(`
+        SELECT body, message_type, requestor_role, created_at
+        FROM messages
+        WHERE booking_id = ?
+        ORDER BY created_at DESC
+        LIMIT 20
+      `).all(bookingId);
+    } else {
+      // Fallback: get recent messages by phone (for unknown guests)
+      messages = await db.prepare(`
+        SELECT body, message_type, requestor_role, created_at
+        FROM messages
+        WHERE (from_number = ? OR to_number = ?) AND booking_id IS NULL
+        ORDER BY created_at DESC
+        LIMIT 20
+      `).all(phone, phone);
+    }
 
     if (messages && messages.length) {
       const historyArr = messages.reverse().map(m => {

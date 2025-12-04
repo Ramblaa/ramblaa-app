@@ -12,19 +12,21 @@ const router = Router();
 
 /**
  * GET /api/messages
- * Get all conversations (grouped by phone number)
+ * Get all conversations (grouped by BOOKING - like Airbnb)
+ * Each booking has its own separate chat thread
  */
 router.get('/', async (req, res) => {
   try {
     const db = getDb();
     const { propertyId, limit = 50 } = req.query;
 
-    // Get conversations - PostgreSQL compatible query
+    // Get conversations grouped by BOOKING (not phone number)
+    // This ensures each booking has its own chat history
     let sql = `
-      SELECT DISTINCT ON (m.from_number)
+      SELECT DISTINCT ON (COALESCE(m.booking_id, m.from_number))
         m.id, m.from_number, m.to_number, m.body, m.created_at, m.message_type,
         m.requestor_role, m.property_id, m.booking_id,
-        b.guest_name,
+        b.guest_name, b.start_date, b.end_date,
         p.name as property_name
       FROM messages m
       LEFT JOIN bookings b ON m.booking_id = b.id
@@ -40,26 +42,36 @@ router.get('/', async (req, res) => {
     }
 
     sql += `
-      ORDER BY m.from_number, m.created_at DESC
+      ORDER BY COALESCE(m.booking_id, m.from_number), m.created_at DESC
       LIMIT ?
     `;
     params.push(parseInt(limit, 10));
 
     const conversations = await db.prepare(sql).all(...params);
 
-    // Format response
-    const formatted = conversations.map(conv => ({
-      id: conv.id,
-      phone: conv.from_number,
-      guestName: conv.guest_name || formatPhoneForDisplay(conv.from_number),
-      property: conv.property_name || 'Unknown Property',
-      propertyId: conv.property_id,
-      bookingId: conv.booking_id,
-      lastMessage: conv.body || '',
-      timestamp: conv.created_at,
-      messageCount: 1, // Simplified for now
-      requestorRole: conv.requestor_role,
-    }));
+    // Format response with booking info
+    const formatted = conversations.map(conv => {
+      // Build guest name with booking dates if available
+      let displayName = conv.guest_name || formatPhoneForDisplay(conv.from_number);
+      if (conv.start_date && conv.end_date) {
+        const start = new Date(conv.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const end = new Date(conv.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        displayName = `${displayName} (${start} - ${end})`;
+      }
+
+      return {
+        id: conv.booking_id || conv.id, // Use booking_id as conversation ID when available
+        phone: conv.from_number,
+        guestName: displayName,
+        property: conv.property_name || 'Unknown Property',
+        propertyId: conv.property_id,
+        bookingId: conv.booking_id,
+        lastMessage: conv.body || '',
+        timestamp: conv.created_at,
+        messageCount: 1,
+        requestorRole: conv.requestor_role,
+      };
+    });
 
     res.json(formatted);
   } catch (error) {
@@ -69,50 +81,77 @@ router.get('/', async (req, res) => {
 });
 
 /**
- * GET /api/messages/:phone
- * Get conversation history for a phone number
+ * GET /api/messages/:id
+ * Get conversation history for a booking or phone number
+ * :id can be a booking_id (UUID) or phone number
  */
-router.get('/:phone', async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const db = getDb();
-    const { phone } = req.params;
+    const { id } = req.params;
     const { limit = 100 } = req.query;
 
-    // Normalize phone for lookup
-    const tokens = canonPhoneTokens(phone);
-    const pattern = `%${tokens.last10}%`;
+    let messages;
 
-    // Get all messages for this phone
-    const messages = await db.prepare(`
-      SELECT m.*, 
-        CASE 
-          WHEN m.message_type = 'Inbound' THEN 'guest'
-          ELSE 'host'
-        END as sender,
-        CASE
-          WHEN m.requestor_role = 'Staff' THEN 'staff'
-          WHEN m.requestor_role = 'Host' THEN 'host'
-          ELSE 'rambley'
-        END as sender_type
-      FROM messages m
-      WHERE m.from_number LIKE ? OR m.to_number LIKE ?
-      ORDER BY m.created_at ASC
-      LIMIT ?
+    // Check if id looks like a UUID (booking_id) or phone number
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+    if (isUUID) {
+      // Fetch messages by booking_id - scoped to this booking only
+      messages = await db.prepare(`
+        SELECT m.*, 
+          CASE 
+            WHEN m.message_type = 'Inbound' THEN 'guest'
+            ELSE 'host'
+          END as sender,
+          CASE
+            WHEN m.requestor_role = 'Staff' THEN 'staff'
+            WHEN m.requestor_role = 'Host' THEN 'host'
+            ELSE 'rambley'
+          END as sender_type
+        FROM messages m
+        WHERE m.booking_id = ?
+        ORDER BY m.created_at ASC
+        LIMIT ?
+      `).all(id, parseInt(limit, 10));
+    } else {
+      // Fallback: fetch by phone for messages without booking
+      const tokens = canonPhoneTokens(id);
+      const pattern = `%${tokens.last10}%`;
+
+      messages = await db.prepare(`
+        SELECT m.*, 
+          CASE 
+            WHEN m.message_type = 'Inbound' THEN 'guest'
+            ELSE 'host'
+          END as sender,
+          CASE
+            WHEN m.requestor_role = 'Staff' THEN 'staff'
+            WHEN m.requestor_role = 'Host' THEN 'host'
+            ELSE 'rambley'
+          END as sender_type
+        FROM messages m
+        WHERE (m.from_number LIKE ? OR m.to_number LIKE ?) AND m.booking_id IS NULL
+        ORDER BY m.created_at ASC
+        LIMIT ?
     `).all(pattern, pattern, parseInt(limit, 10));
+    }
 
     // Get conversation metadata
     const firstMsg = messages[0];
-    let guestName = formatPhoneForDisplay(phone);
+    let guestName = formatPhoneForDisplay(id);
     let propertyName = 'Unknown Property';
-    let bookingId = null;
+    let bookingId = isUUID ? id : null;
     let propertyId = null;
+    let phone = id;
 
-    if (firstMsg?.booking_id) {
-      const booking = await db.prepare('SELECT * FROM bookings WHERE id = ?').get(firstMsg.booking_id);
+    if (isUUID || firstMsg?.booking_id) {
+      const booking = await db.prepare('SELECT * FROM bookings WHERE id = ?').get(isUUID ? id : firstMsg.booking_id);
       if (booking) {
         guestName = booking.guest_name || guestName;
         bookingId = booking.id;
         propertyId = booking.property_id;
+        phone = booking.guest_phone || phone;
       }
     }
 
@@ -140,13 +179,13 @@ router.get('/:phone', async (req, res) => {
     }));
 
     res.json({
-      phone: tokens.e164 || phone,
+      phone,
       guestName,
       property: propertyName,
       propertyId,
       bookingId,
       messages: formatted,
-      autoResponseEnabled: true, // Could be stored per-conversation
+      autoResponseEnabled: true,
     });
   } catch (error) {
     console.error('[Messages] Get error:', error);
