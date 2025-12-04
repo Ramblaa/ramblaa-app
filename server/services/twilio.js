@@ -129,10 +129,14 @@ async function logOutboundMessage({
     const stmt = db.prepare(`
       INSERT INTO messages (
         id, from_number, to_number, body, message_type, requestor_role,
-        property_id, booking_id, reference_task_ids, ai_enrichment_id,
+        property_id, booking_id, reference_task_ids, task_action, ai_enrichment_id,
         reference_message_ids, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `);
+
+    // If taskId is provided and it's a follow-up (not initial task creation),
+    // set task_action to 'updated'
+    const taskAction = taskId ? 'updated' : null;
 
     stmt.run(
       id,
@@ -144,6 +148,7 @@ async function logOutboundMessage({
       propertyId || null,
       bookingId || null,
       taskId || null,
+      taskAction,
       aiEnrichmentId || null,
       referenceMessageIds || null
     );

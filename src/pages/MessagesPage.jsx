@@ -255,14 +255,17 @@ export default function MessagesPage() {
     }
   }
 
-  const renderTaskLinks = (taskIds) => {
+  const renderTaskLinks = (taskIds, taskAction) => {
     if (!taskIds || taskIds.length === 0) return null
+
+    // Show "Task created" or "Task updated" based on taskAction
+    const label = taskAction === 'created' ? 'Task created:' : 'Task updated:'
 
     return (
       <div className="mt-2 pt-2 border-t border-brand-mid-gray/20">
         <div className="flex items-center gap-1 text-xs text-brand-mid-gray mb-1">
           <CheckSquare className="h-3 w-3" />
-          <span>Tasks created:</span>
+          <span>{label}</span>
         </div>
         <div className="space-y-1">
           {taskIds.map(taskId => (
@@ -271,7 +274,10 @@ export default function MessagesPage() {
               onClick={() => handleTaskLink(taskId)}
               className="flex items-center gap-2 text-xs text-brand-purple hover:text-brand-purple/80 transition-colors group"
             >
-              <div className="w-2 h-2 rounded-full bg-yellow-500" />
+              <div className={cn(
+                "w-2 h-2 rounded-full",
+                taskAction === 'created' ? "bg-green-500" : "bg-yellow-500"
+              )} />
               <span className="flex-1 text-left truncate">Task {taskId.slice(0, 8)}...</span>
               <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
             </button>
@@ -505,7 +511,7 @@ export default function MessagesPage() {
                         </p>
                         
                         {/* Task Links */}
-                        {renderTaskLinks(message.taskIds)}
+                        {renderTaskLinks(message.taskIds, message.taskAction)}
                       </div>
                     </div>
                   </motion.div>

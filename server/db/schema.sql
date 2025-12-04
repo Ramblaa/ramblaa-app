@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS messages (
   staff_id TEXT,
   reference_message_ids TEXT,
   reference_task_ids TEXT,
+  task_action TEXT,  -- 'created' or 'updated' to show correct label in UI
   ai_enrichment_id TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (booking_id) REFERENCES bookings(id),

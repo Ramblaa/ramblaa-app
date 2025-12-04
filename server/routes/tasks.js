@@ -173,7 +173,17 @@ router.post('/migrate-dates', async (req, res) => {
       }
     }
     
-    res.json({ success: true, message: 'Date columns migration complete' });
+    // Add task_action column to messages if not exists
+    try {
+      await db.prepare(`ALTER TABLE messages ADD COLUMN task_action TEXT`).run();
+      console.log('[Tasks] Added task_action column to messages');
+    } catch (e) {
+      if (!e.message.includes('already exists') && !e.message.includes('duplicate column')) {
+        console.log('[Tasks] task_action column may already exist:', e.message);
+      }
+    }
+    
+    res.json({ success: true, message: 'All migrations complete' });
   } catch (error) {
     console.error('[Tasks] Migration error:', error);
     res.status(500).json({ error: error.message });
