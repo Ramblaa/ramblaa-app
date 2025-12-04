@@ -3,6 +3,7 @@
  * Core AI pipeline for processing inbound messages
  * 
  * KEY CHANGE: No consolidation - each intent processed and sent individually
+ * UUID TRACKING: Each stage links back to original message for audit trail
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -28,8 +29,11 @@ export async function processInboundMessage(message) {
   const responses = [];
 
   try {
+    console.log(`[MessageProcessor] Processing message ${message.id} from ${message.from_number}`);
+
     // 1. Get context (booking, property, FAQs, history)
     const context = await getMessageContext(message);
+    console.log(`[MessageProcessor] Context: property=${context.propertyId}, booking=${context.bookingId}`);
 
     // 2. Summarize message into action titles
     const summary = await summarizeMessage(message.body, context.history);
@@ -37,6 +41,8 @@ export async function processInboundMessage(message) {
       console.log('[MessageProcessor] No actionable items found');
       return responses;
     }
+
+    console.log(`[MessageProcessor] Found ${summary.actionTitles.length} action(s): ${summary.actionTitles.join(', ')}`);
 
     // 3. Process each action title individually (NO CONSOLIDATION)
     for (const actionTitle of summary.actionTitles) {
@@ -52,6 +58,8 @@ export async function processInboundMessage(message) {
 
         // 4. Send immediately (each intent as individual message)
         if (response.aiResponse && message.from_number) {
+          console.log(`[MessageProcessor] Sending response for: ${actionTitle}`);
+          
           await sendWhatsAppMessage({
             to: message.from_number,
             body: response.aiResponse,
@@ -64,16 +72,20 @@ export async function processInboundMessage(message) {
             },
           });
 
-          // Update status to sent
-          db.prepare(`UPDATE ai_logs SET status = 'Sent', sent_status = 1 WHERE id = ?`)
-            .run(response.id);
+          // Update status to sent and link back to original message
+          await db.prepare(`UPDATE ai_logs SET status = 'Sent' WHERE id = ?`).run(response.id);
+          
+          // Update original message with AI enrichment ID for audit trail
+          await db.prepare(`UPDATE messages SET ai_enrichment_id = ? WHERE id = ?`).run(response.id, message.id);
+          
+          console.log(`[MessageProcessor] Response sent, ai_log=${response.id}`);
         }
       }
     }
 
     return responses;
   } catch (error) {
-    console.error('[MessageProcessor] Error:', error.message);
+    console.error('[MessageProcessor] Error:', error.message, error.stack);
     return responses;
   }
 }
@@ -88,6 +100,7 @@ async function summarizeMessage(messageBody, history = '[]') {
     MESSAGE: messageBody,
   });
 
+  console.log('[MessageProcessor] Calling AI for summarization...');
   const result = await chatJSON(prompt);
   
   if (result.error || !result.json) {
@@ -96,6 +109,8 @@ async function summarizeMessage(messageBody, history = '[]') {
   }
 
   const data = result.json;
+  console.log('[MessageProcessor] Summarized:', JSON.stringify(data));
+  
   return {
     language: data.Language || 'en',
     tone: data.Tone || '',
@@ -114,8 +129,10 @@ async function processActionTitle({ actionTitle, message, context, summary }) {
   const db = getDb();
   const id = uuidv4();
 
+  console.log(`[MessageProcessor] Processing action: "${actionTitle}" with id=${id}`);
+
   // Get category lists for this property
-  const { faqsList, tasksList } = getCategoryLists(context.propertyId);
+  const { faqsList, tasksList } = await getCategoryLists(context.propertyId);
 
   // Build enrichment prompt
   const prompt = fillTemplate(PROMPT_AI_RESPONSE_FROM_SUMMARY, {
@@ -134,6 +151,7 @@ async function processActionTitle({ actionTitle, message, context, summary }) {
     }),
   });
 
+  console.log('[MessageProcessor] Calling AI for enrichment & response...');
   const result = await chatJSON(prompt);
 
   if (result.error || !result.json) {
@@ -142,6 +160,7 @@ async function processActionTitle({ actionTitle, message, context, summary }) {
   }
 
   const data = result.json;
+  console.log('[MessageProcessor] Enrichment result:', JSON.stringify(data));
 
   // Build response record
   const response = {
@@ -150,11 +169,11 @@ async function processActionTitle({ actionTitle, message, context, summary }) {
     propertyId: context.propertyId,
     bookingId: context.bookingId,
     toNumber: message.from_number,
-    messageBundleId: message.id,
+    messageBundleId: message.id,  // Links back to original message UUID
     originalMessage: actionTitle,
     availablePropertyKnowledge: data.AvailablePropertyKnowledge === 'Yes',
     propertyKnowledgeCategory: data.PropertyKnowledgeCategory || '',
-    taskRequired: data.TaskRequired === true,
+    taskRequired: data.TaskRequired === true || data.TaskRequired === 'Yes',
     taskBucket: data.TaskBucket || '',
     taskRequestTitle: data.TaskRequestTitle || '',
     urgencyIndicators: data.UrgencyIndicators || 'None',
@@ -164,27 +183,27 @@ async function processActionTitle({ actionTitle, message, context, summary }) {
     status: 'Pending',
   };
 
-  // Insert into ai_logs
-  const stmt = db.prepare(`
+  console.log(`[MessageProcessor] Task required: ${response.taskRequired}, bucket: ${response.taskBucket}`);
+
+  // Insert into ai_logs with message_bundle_uuid for audit trail
+  await db.prepare(`
     INSERT INTO ai_logs (
-      id, recipient_type, property_id, booking_id, to_number, message_bundle_id,
-      original_message, available_property_knowledge, property_knowledge_category,
+      id, recipient_type, property_id, booking_id, to_number, message_bundle_uuid,
+      message, available_property_knowledge, property_knowledge_category,
       task_required, task_bucket, task_request_title, urgency_indicators,
       escalation_risk_indicators, ai_message_response, ticket_enrichment_json, status
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  stmt.run(
+  `).run(
     response.id,
     response.recipientType,
     response.propertyId,
     response.bookingId,
     response.toNumber,
-    response.messageBundleId,
+    response.messageBundleId,  // UUID of original message
     response.originalMessage,
-    response.availablePropertyKnowledge ? 1 : 0,
+    response.availablePropertyKnowledge ? true : false,
     response.propertyKnowledgeCategory,
-    response.taskRequired ? 1 : 0,
+    response.taskRequired ? true : false,
     response.taskBucket,
     response.taskRequestTitle,
     response.urgencyIndicators,
@@ -193,6 +212,8 @@ async function processActionTitle({ actionTitle, message, context, summary }) {
     response.ticketEnrichmentJson,
     response.status
   );
+
+  console.log(`[MessageProcessor] Inserted ai_log ${response.id}`);
 
   return response;
 }
@@ -208,7 +229,7 @@ async function getMessageContext(message) {
 
   // Try to lookup booking by phone if not set
   if (!bookingId && message.from_number) {
-    const booking = lookupBookingByPhone(message.from_number);
+    const booking = await lookupBookingByPhone(message.from_number);
     if (booking) {
       bookingId = booking.id;
       propertyId = propertyId || booking.property_id;
@@ -218,7 +239,7 @@ async function getMessageContext(message) {
   // Get booking JSON
   let bookingJson = '(none)';
   if (bookingId) {
-    const booking = db.prepare('SELECT * FROM bookings WHERE id = ?').get(bookingId);
+    const booking = await db.prepare('SELECT * FROM bookings WHERE id = ?').get(bookingId);
     if (booking) {
       bookingJson = booking.details_json || JSON.stringify(booking);
     }
@@ -227,7 +248,7 @@ async function getMessageContext(message) {
   // Get property JSON
   let propertyJson = '(none)';
   if (propertyId) {
-    const property = db.prepare('SELECT * FROM properties WHERE id = ?').get(propertyId);
+    const property = await db.prepare('SELECT * FROM properties WHERE id = ?').get(propertyId);
     if (property) {
       propertyJson = property.details_json || JSON.stringify(property);
     }
@@ -236,8 +257,8 @@ async function getMessageContext(message) {
   // Get FAQs
   let faqsJson = '[]';
   if (propertyId) {
-    const faqs = db.prepare('SELECT * FROM faqs WHERE property_id = ?').all(propertyId);
-    if (faqs.length) {
+    const faqs = await db.prepare('SELECT * FROM faqs WHERE property_id = ?').all(propertyId);
+    if (faqs && faqs.length) {
       faqsJson = JSON.stringify(faqs.map(f => ({
         'Sub-Category Name': f.sub_category_name,
         Description: f.description,
@@ -250,7 +271,7 @@ async function getMessageContext(message) {
   let history = '[]';
   const phone = message.from_number;
   if (phone) {
-    const messages = db.prepare(`
+    const messages = await db.prepare(`
       SELECT body, message_type, requestor_role, created_at
       FROM messages
       WHERE (from_number = ? OR to_number = ?)
@@ -258,7 +279,7 @@ async function getMessageContext(message) {
       LIMIT 20
     `).all(phone, phone);
 
-    if (messages.length) {
+    if (messages && messages.length) {
       const historyArr = messages.reverse().map(m => {
         const role = m.requestor_role || (m.message_type === 'Inbound' ? 'Guest' : 'Host');
         const direction = m.message_type || 'Inbound';
@@ -281,43 +302,44 @@ async function getMessageContext(message) {
 /**
  * Lookup booking by guest phone number
  */
-function lookupBookingByPhone(phone) {
+async function lookupBookingByPhone(phone) {
   const db = getDb();
   
   // Normalize phone for comparison
   const normalizedPhone = phone.replace(/^whatsapp:/i, '').replace(/[^\d+]/g, '');
+  const pattern = `%${normalizedPhone.slice(-10)}%`;
   
   const now = new Date().toISOString().split('T')[0];
   
   // Try active booking first
-  let booking = db.prepare(`
+  let booking = await db.prepare(`
     SELECT * FROM bookings 
     WHERE guest_phone LIKE ? 
     AND start_date <= ? AND end_date >= ?
     ORDER BY start_date DESC
     LIMIT 1
-  `).get(`%${normalizedPhone.slice(-10)}%`, now, now);
+  `).get(pattern, now, now);
 
   if (booking) return booking;
 
   // Try upcoming booking
-  booking = db.prepare(`
+  booking = await db.prepare(`
     SELECT * FROM bookings 
     WHERE guest_phone LIKE ? 
     AND start_date >= ?
     ORDER BY start_date ASC
     LIMIT 1
-  `).get(`%${normalizedPhone.slice(-10)}%`, now);
+  `).get(pattern, now);
 
   if (booking) return booking;
 
   // Try most recent past booking
-  booking = db.prepare(`
+  booking = await db.prepare(`
     SELECT * FROM bookings 
     WHERE guest_phone LIKE ? 
     ORDER BY end_date DESC
     LIMIT 1
-  `).get(`%${normalizedPhone.slice(-10)}%`);
+  `).get(pattern);
 
   return booking;
 }
@@ -325,26 +347,26 @@ function lookupBookingByPhone(phone) {
 /**
  * Get FAQ and task category lists for a property
  */
-function getCategoryLists(propertyId) {
+async function getCategoryLists(propertyId) {
   const db = getDb();
 
   let faqsList = 'Other';
   let tasksList = 'Other';
 
   if (propertyId) {
-    const faqs = db.prepare(`
+    const faqs = await db.prepare(`
       SELECT DISTINCT sub_category_name FROM faqs WHERE property_id = ?
     `).all(propertyId);
     
-    if (faqs.length) {
+    if (faqs && faqs.length) {
       faqsList = faqs.map(f => f.sub_category_name).join(', ');
     }
 
-    const tasks = db.prepare(`
+    const tasks = await db.prepare(`
       SELECT DISTINCT sub_category_name FROM task_definitions WHERE property_id = ?
     `).all(propertyId);
 
-    if (tasks.length) {
+    if (tasks && tasks.length) {
       tasksList = tasks.map(t => t.sub_category_name).join(', ');
     }
   }
@@ -360,13 +382,13 @@ export async function processPendingAiLogs() {
   const db = getDb();
 
   // Get all pending entries
-  const pending = db.prepare(`
+  const pending = await db.prepare(`
     SELECT * FROM ai_logs 
-    WHERE status = 'Pending' AND sent_status = 0 AND ai_message_response IS NOT NULL
+    WHERE status = 'Pending' AND ai_message_response IS NOT NULL
     ORDER BY created_at ASC
   `).all();
 
-  if (!pending.length) return [];
+  if (!pending || !pending.length) return [];
 
   const results = [];
 
@@ -382,14 +404,13 @@ export async function processPendingAiLogs() {
         propertyId: entry.property_id,
         bookingId: entry.booking_id,
         aiEnrichmentId: entry.id,
-        taskId: entry.task_id,
+        taskId: entry.task_uuid,
       },
     });
 
     // Update status
     const newStatus = result.success ? 'Sent' : 'Error';
-    db.prepare(`UPDATE ai_logs SET status = ?, sent_status = ? WHERE id = ?`)
-      .run(newStatus, result.success ? 1 : 0, entry.id);
+    await db.prepare(`UPDATE ai_logs SET status = ? WHERE id = ?`).run(newStatus, entry.id);
 
     results.push({ entry, result });
   }
@@ -403,4 +424,3 @@ export default {
   lookupBookingByPhone,
   getCategoryLists,
 };
-

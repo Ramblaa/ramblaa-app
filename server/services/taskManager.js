@@ -1,6 +1,8 @@
 /**
  * Task Manager Service - Ported from guestResponse.gs
  * Handles task creation, workflow, and completion
+ * 
+ * UUID TRACKING: Tasks link to message_chain_ids for full audit trail
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -28,17 +30,27 @@ export async function createTasksFromAiLogs() {
   const created = [];
 
   // Get AI logs that need task creation
-  const logs = db.prepare(`
+  const logs = await db.prepare(`
     SELECT * FROM ai_logs 
-    WHERE task_required = 1 AND task_created = 0 AND recipient_type = 'Guest'
+    WHERE task_required = true AND task_created = false AND recipient_type = 'Guest'
     ORDER BY created_at ASC
   `).all();
 
+  if (!logs || !logs.length) {
+    console.log('[TaskManager] No AI logs requiring task creation');
+    return created;
+  }
+
+  console.log(`[TaskManager] Processing ${logs.length} AI logs for task creation`);
+
   for (const log of logs) {
-    if (!log.task_bucket) continue;
+    if (!log.task_bucket) {
+      console.log(`[TaskManager] Skipping log ${log.id} - no task bucket`);
+      continue;
+    }
 
     // Check for existing open task with same bucket
-    const existing = db.prepare(`
+    const existing = await db.prepare(`
       SELECT id FROM tasks 
       WHERE phone = ? AND property_id = ? AND task_bucket = ? AND status != 'Completed'
       LIMIT 1
@@ -46,53 +58,60 @@ export async function createTasksFromAiLogs() {
 
     if (existing) {
       // Update the existing task reference
-      db.prepare(`UPDATE ai_logs SET task_created = 1, task_id = ? WHERE id = ?`)
+      console.log(`[TaskManager] Linking to existing task ${existing.id}`);
+      await db.prepare(`UPDATE ai_logs SET task_created = true, task_uuid = ? WHERE id = ?`)
         .run(existing.id, log.id);
       continue;
     }
 
-    // Get task definition
-    const taskDef = db.prepare(`
+    // Get task definition to find assigned staff
+    const taskDef = await db.prepare(`
       SELECT * FROM task_definitions 
       WHERE property_id = ? AND sub_category_name = ?
       LIMIT 1
     `).get(log.property_id, log.task_bucket);
 
-    // Create new task
+    if (taskDef) {
+      console.log(`[TaskManager] Found task definition: ${taskDef.sub_category_name}, staff: ${taskDef.staff_name}`);
+    } else {
+      console.log(`[TaskManager] No task definition found for bucket: ${log.task_bucket}`);
+    }
+
+    // Create new task with UUID
     const taskId = uuidv4();
     const task = {
       id: taskId,
       property_id: log.property_id,
       booking_id: log.booking_id,
       phone: log.to_number,
-      guest_message: log.original_message,
-      action_title: log.original_message,
+      guest_message: log.message || log.original_message,
+      action_title: log.message || log.original_message,
       task_bucket: log.task_bucket,
       sub_category: log.task_bucket,
-      task_request_title: log.task_request_title || log.original_message,
+      task_request_title: log.task_request_title || log.message || '',
       task_json: taskDef?.details_json || '',
-      staff_id: taskDef?.staff_id || '',
-      staff_name: taskDef?.staff_name || '',
-      staff_phone: taskDef?.staff_phone || '',
+      staff_id: taskDef?.staff_id || null,
+      staff_name: taskDef?.staff_name || null,
+      staff_phone: taskDef?.staff_phone || null,
       staff_requirements: taskDef?.staff_requirements || '',
       guest_requirements: taskDef?.guest_requirements || '',
       host_escalation: taskDef?.host_escalation || '',
       action_holder: taskDef?.guest_requirements ? 'Guest' : 'Staff',
-      action_holder_phone: taskDef?.guest_requirements ? log.to_number : (taskDef?.staff_phone || ''),
+      action_holder_phone: taskDef?.guest_requirements ? log.to_number : (taskDef?.staff_phone || null),
       status: taskDef?.guest_requirements ? 'Waiting on Guest' : 'Waiting on Staff',
-      message_chain_ids: log.message_bundle_id || '',
+      message_chain_ids: log.message_bundle_uuid || log.id,  // Link to original message UUID
     };
 
-    const stmt = db.prepare(`
+    console.log(`[TaskManager] Creating task ${taskId} for bucket: ${task.task_bucket}`);
+
+    await db.prepare(`
       INSERT INTO tasks (
         id, property_id, booking_id, phone, guest_message, action_title,
         task_bucket, sub_category, task_request_title, task_json,
         staff_id, staff_name, staff_phone, staff_requirements, guest_requirements,
         host_escalation, action_holder, action_holder_phone, status, message_chain_ids
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
+    `).run(
       task.id, task.property_id, task.booking_id, task.phone,
       task.guest_message, task.action_title, task.task_bucket, task.sub_category,
       task.task_request_title, task.task_json, task.staff_id, task.staff_name,
@@ -101,10 +120,11 @@ export async function createTasksFromAiLogs() {
       task.status, task.message_chain_ids
     );
 
-    // Update AI log
-    db.prepare(`UPDATE ai_logs SET task_created = 1, task_id = ? WHERE id = ?`)
+    // Update AI log with task reference
+    await db.prepare(`UPDATE ai_logs SET task_created = true, task_uuid = ? WHERE id = ?`)
       .run(taskId, log.id);
 
+    console.log(`[TaskManager] Task ${taskId} created, assigned to: ${task.staff_name || 'unassigned'}`);
     created.push(task);
   }
 
@@ -120,11 +140,18 @@ export async function processTaskWorkflow() {
   const results = [];
 
   // Get active tasks that need processing
-  const tasks = db.prepare(`
+  const tasks = await db.prepare(`
     SELECT * FROM tasks 
-    WHERE status != 'Completed' AND completion_notified = 0
+    WHERE status != 'Completed' AND (completion_notified = false OR completion_notified IS NULL)
     ORDER BY created_at ASC
   `).all();
+
+  if (!tasks || !tasks.length) {
+    console.log('[TaskManager] No tasks to process');
+    return results;
+  }
+
+  console.log(`[TaskManager] Processing ${tasks.length} active tasks`);
 
   for (const task of tasks) {
     const result = await processTask(task);
@@ -140,22 +167,25 @@ export async function processTaskWorkflow() {
 async function processTask(task) {
   const db = getDb();
 
+  console.log(`[TaskManager] Processing task ${task.id}, status: ${task.status}`);
+
   // Check if task is completed
   if (task.status === 'Completed') {
     // Send completion notification if not already sent
     if (!task.completion_notified) {
       await sendCompletionNotification(task);
-      db.prepare(`UPDATE tasks SET completion_notified = 1 WHERE id = ?`).run(task.id);
+      await db.prepare(`UPDATE tasks SET completion_notified = true WHERE id = ?`).run(task.id);
     }
     return { task, action: 'completed' };
   }
 
   // Check if we're waiting for a response
   const hasKickoff = task.ai_message_response && task.ai_message_response.length > 0;
-  const responseReceived = task.response_received === 1;
+  const responseReceived = task.response_received === true;
 
   if (hasKickoff && !responseReceived) {
     // Still waiting for response, skip
+    console.log(`[TaskManager] Task ${task.id} waiting for response`);
     return { task, action: 'waiting' };
   }
 
@@ -185,20 +215,22 @@ async function processTask(task) {
     actionHolder = 'Guest';
   }
 
+  console.log(`[TaskManager] Task ${task.id} action holder: ${actionHolder}`);
+
   // Handle based on action holder
   let result = { task, action: actionHolder.toLowerCase() };
 
   if (actionHolder === 'Host') {
     await handleHostPath(task, triageResult, lang);
-    db.prepare(`UPDATE tasks SET action_holder = 'Host', status = 'Waiting on Host' WHERE id = ?`)
+    await db.prepare(`UPDATE tasks SET action_holder = 'Host', status = 'Waiting on Host' WHERE id = ?`)
       .run(task.id);
   } else if (actionHolder === 'Guest') {
     await handleGuestPath(task, guestSatisfied.missingItems, lang);
-    db.prepare(`UPDATE tasks SET action_holder = 'Guest', status = 'Waiting on Guest' WHERE id = ?`)
+    await db.prepare(`UPDATE tasks SET action_holder = 'Guest', status = 'Waiting on Guest' WHERE id = ?`)
       .run(task.id);
   } else {
     await handleStaffPath(task, triageResult, lang);
-    db.prepare(`UPDATE tasks SET action_holder = 'Staff', status = 'Waiting on Staff' WHERE id = ?`)
+    await db.prepare(`UPDATE tasks SET action_holder = 'Staff', status = 'Waiting on Staff' WHERE id = ?`)
       .run(task.id);
   }
 
@@ -264,11 +296,14 @@ async function handleHostPath(task, triageResult, lang) {
   // Get host phone
   let hostPhone = '';
   if (task.property_id) {
-    const property = db.prepare('SELECT host_phone FROM properties WHERE id = ?').get(task.property_id);
+    const property = await db.prepare('SELECT host_phone FROM properties WHERE id = ?').get(task.property_id);
     hostPhone = property?.host_phone || '';
   }
 
-  if (!hostPhone) return;
+  if (!hostPhone) {
+    console.log(`[TaskManager] No host phone for task ${task.id}`);
+    return;
+  }
 
   // Generate host message
   const prompt = fillTemplate(PROMPT_HOST_ESCALATION, {
@@ -291,6 +326,8 @@ async function handleHostPath(task, triageResult, lang) {
     message = 'Host: ' + message;
   }
 
+  console.log(`[TaskManager] Sending host escalation for task ${task.id}`);
+
   // Send message
   await sendWhatsAppMessage({
     to: hostPhone,
@@ -303,12 +340,13 @@ async function handleHostPath(task, triageResult, lang) {
   });
 
   // Update task
-  db.prepare(`
+  await db.prepare(`
     UPDATE tasks SET 
       ai_message_response = ?, 
       action_holder_phone = ?,
-      action_holder_notified = 1,
-      host_notified = 1
+      action_holder_notified = true,
+      host_notified = true,
+      host_escalation_needed = true
     WHERE id = ?
   `).run(message, hostPhone, task.id);
 }
@@ -329,6 +367,8 @@ async function handleGuestPath(task, missingItems, lang) {
   const message = await callGPTTurbo([{ role: 'user', content: prompt }]);
   if (!message) return;
 
+  console.log(`[TaskManager] Requesting info from guest for task ${task.id}`);
+
   // Send message
   await sendWhatsAppMessage({
     to: task.phone,
@@ -341,11 +381,11 @@ async function handleGuestPath(task, missingItems, lang) {
   });
 
   // Update task
-  db.prepare(`
+  await db.prepare(`
     UPDATE tasks SET 
       ai_message_response = ?, 
       action_holder_phone = ?,
-      action_holder_notified = 1,
+      action_holder_notified = true,
       action_holder_missing_requirements = ?
     WHERE id = ?
   `).run(message, task.phone, missingItems.join('; '), task.id);
@@ -357,7 +397,10 @@ async function handleGuestPath(task, missingItems, lang) {
 async function handleStaffPath(task, triageResult, lang) {
   const db = getDb();
 
-  if (!task.staff_phone) return;
+  if (!task.staff_phone) {
+    console.log(`[TaskManager] No staff phone for task ${task.id}`);
+    return;
+  }
 
   const staffName = task.staff_name?.split(' ')[0] || 'there';
 
@@ -381,6 +424,8 @@ async function handleStaffPath(task, triageResult, lang) {
     message = `Staff: Hi ${staffName} — ${message}`;
   }
 
+  console.log(`[TaskManager] Notifying staff ${task.staff_name} for task ${task.id}`);
+
   // Send message
   await sendWhatsAppMessage({
     to: task.staff_phone,
@@ -393,11 +438,11 @@ async function handleStaffPath(task, triageResult, lang) {
   });
 
   // Update task
-  db.prepare(`
+  await db.prepare(`
     UPDATE tasks SET 
       ai_message_response = ?, 
       action_holder_phone = ?,
-      action_holder_notified = 1,
+      action_holder_notified = true,
       action_holder_missing_requirements = ?
     WHERE id = ?
   `).run(message, task.staff_phone, task.staff_requirements || '', task.id);
@@ -420,6 +465,8 @@ async function sendCompletionNotification(task) {
   const message = await callGPTTurbo([{ role: 'user', content: prompt }]);
   if (!message) return;
 
+  console.log(`[TaskManager] Sending completion notification for task ${task.id}`);
+
   await sendWhatsAppMessage({
     to: task.phone,
     body: message,
@@ -439,10 +486,12 @@ export async function evaluateTaskStatus() {
   const db = getDb();
   const updates = [];
 
-  const tasks = db.prepare(`
+  const tasks = await db.prepare(`
     SELECT * FROM tasks 
-    WHERE status != 'Completed' AND response_received = 1
+    WHERE status != 'Completed' AND response_received = true
   `).all();
+
+  if (!tasks || !tasks.length) return updates;
 
   for (const task of tasks) {
     if (!task.staff_requirements || !task.ongoing_conversation) continue;
@@ -462,8 +511,9 @@ export async function evaluateTaskStatus() {
       const isComplete = response.trim().toUpperCase() === 'TRUE';
 
       if (isComplete) {
-        db.prepare(`UPDATE tasks SET status = 'Completed' WHERE id = ?`).run(task.id);
+        await db.prepare(`UPDATE tasks SET status = 'Completed' WHERE id = ?`).run(task.id);
         updates.push({ taskId: task.id, status: 'Completed' });
+        console.log(`[TaskManager] Task ${task.id} marked as completed`);
       }
     } catch (error) {
       console.error(`[TaskManager] Eval error for task ${task.id}:`, error.message);
@@ -480,27 +530,40 @@ export async function evaluateTaskStatus() {
 export async function archiveCompletedTasks() {
   const db = getDb();
 
-  const completed = db.prepare(`
+  const completed = await db.prepare(`
     SELECT * FROM tasks WHERE status = 'Completed'
   `).all();
 
+  if (!completed || !completed.length) return 0;
+
   for (const task of completed) {
-    // Insert into archive
-    db.prepare(`
-      INSERT INTO task_archive (
-        id, property_id, booking_id, phone, guest_message, action_title,
-        task_bucket, sub_category, task_json, staff_id, staff_name, status,
-        completed_at, original_task_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+    // Insert into archive (d_task_logs table)
+    await db.prepare(`
+      INSERT INTO d_task_logs (
+        id, task_uuid, created_date, phone, property_id, booking_id, 
+        guest_message, action_title, task_bucket, sub_category, task_json, 
+        staff_id, staff_name, status, archived_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `).run(
-      task.id, task.property_id, task.booking_id, task.phone,
-      task.guest_message, task.action_title, task.task_bucket,
-      task.sub_category, task.task_json, task.staff_id, task.staff_name,
-      task.status, JSON.stringify(task)
+      uuidv4(),
+      task.id,
+      task.created_at,
+      task.phone,
+      task.property_id,
+      task.booking_id,
+      task.guest_message,
+      task.action_title,
+      task.task_bucket,
+      task.sub_category,
+      task.task_json,
+      task.staff_id,
+      task.staff_name,
+      task.status
     );
 
     // Delete from active tasks
-    db.prepare(`DELETE FROM tasks WHERE id = ?`).run(task.id);
+    await db.prepare(`DELETE FROM tasks WHERE id = ?`).run(task.id);
+    console.log(`[TaskManager] Archived task ${task.id}`);
   }
 
   return completed.length;
@@ -509,7 +572,7 @@ export async function archiveCompletedTasks() {
 /**
  * Get all active tasks
  */
-export function getActiveTasks(filters = {}) {
+export async function getActiveTasks(filters = {}) {
   const db = getDb();
   
   let sql = 'SELECT * FROM tasks WHERE 1=1';
@@ -527,29 +590,29 @@ export function getActiveTasks(filters = {}) {
 
   sql += ' ORDER BY created_at DESC';
 
-  return db.prepare(sql).all(...params);
+  return await db.prepare(sql).all(...params);
 }
 
 /**
  * Get task by ID
  */
-export function getTaskById(taskId) {
+export async function getTaskById(taskId) {
   const db = getDb();
-  return db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+  return await db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
 }
 
 /**
  * Update task
  */
-export function updateTask(taskId, updates) {
+export async function updateTask(taskId, updates) {
   const db = getDb();
   
   const fields = Object.keys(updates);
   const setClause = fields.map(f => `${f} = ?`).join(', ');
   const sql = `UPDATE tasks SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
   
-  db.prepare(sql).run(...Object.values(updates), taskId);
-  return getTaskById(taskId);
+  await db.prepare(sql).run(...Object.values(updates), taskId);
+  return await getTaskById(taskId);
 }
 
 export default {
@@ -561,4 +624,3 @@ export default {
   getTaskById,
   updateTask,
 };
-

@@ -174,7 +174,7 @@ router.get('/:id', async (req, res) => {
  * POST /api/tasks
  * Create a new task
  */
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const db = getDb();
     const {
@@ -195,7 +195,7 @@ router.post('/', (req, res) => {
 
     const id = uuidv4();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO tasks (
         id, property_id, booking_id, phone, task_request_title,
         guest_message, task_bucket, staff_id, staff_name, staff_phone,
@@ -214,7 +214,7 @@ router.post('/', (req, res) => {
       staffPhone || null
     );
 
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+    const task = await db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
     res.status(201).json(task);
   } catch (error) {
     console.error('[Tasks] Create error:', error);
@@ -226,14 +226,14 @@ router.post('/', (req, res) => {
  * PATCH /api/tasks/:id
  * Update task status or details
  */
-router.patch('/:id', (req, res) => {
+router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
     const db = getDb();
 
     // Validate task exists
-    const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+    const existing = await db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
     if (!existing) {
       return res.status(404).json({ error: 'Task not found' });
     }
@@ -243,7 +243,7 @@ router.patch('/:id', (req, res) => {
       updates.status = mapStatus(updates.status);
     }
 
-    const updated = updateTask(id, updates);
+    const updated = await updateTask(id, updates);
     res.json(updated);
   } catch (error) {
     console.error('[Tasks] Update error:', error);
@@ -255,17 +255,17 @@ router.patch('/:id', (req, res) => {
  * DELETE /api/tasks/:id
  * Delete a task
  */
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const db = getDb();
 
-    const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+    const existing = await db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
     if (!existing) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+    await db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
     res.json({ success: true });
   } catch (error) {
     console.error('[Tasks] Delete error:', error);
@@ -281,7 +281,7 @@ router.post('/:id/complete', async (req, res) => {
   try {
     const { id } = req.params;
     
-    const updated = updateTask(id, { status: 'Completed' });
+    const updated = await updateTask(id, { status: 'Completed' });
     res.json(updated);
   } catch (error) {
     console.error('[Tasks] Complete error:', error);

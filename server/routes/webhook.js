@@ -1,6 +1,8 @@
 /**
  * Webhook Routes - Ported from twilioApiWebhook.gs
  * Handles inbound Twilio WhatsApp messages
+ * 
+ * UUID TRACKING: Each inbound message gets a UUID stored in messages.id
  */
 
 import { Router } from 'express';
@@ -8,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDbWithPrepare as getDb } from '../db/index.js';
 import { canonPhoneTokens, normalizeWhatsAppPhone } from '../utils/phoneUtils.js';
 import { processInboundMessage } from '../services/messageProcessor.js';
+import { createTasksFromAiLogs, processTaskWorkflow } from '../services/taskManager.js';
 import { sendToWebhook, fetchTwilioMedia } from '../services/twilio.js';
 
 const router = Router();
@@ -27,8 +30,11 @@ router.post('/twilio', async (req, res) => {
     const messageSid = params.MessageSid || params.SmsMessageSid || '';
     const numMedia = parseInt(params.NumMedia || '0', 10) || 0;
 
+    // Generate UUID for message tracking
     const id = messageSid || uuidv4();
     const db = getDb();
+
+    console.log(`[Webhook] Processing message ${id} from ${from}`);
 
     // Handle media attachments
     const mediaUrls = [];
@@ -37,77 +43,78 @@ router.post('/twilio', async (req, res) => {
         const mediaUrl = params[`MediaUrl${i}`];
         if (mediaUrl) {
           mediaUrls.push(mediaUrl);
-          // Note: In production, you'd want to download and store media
-          // const media = await fetchTwilioMedia(mediaUrl);
         }
       }
     }
 
     // Determine requestor role
-    let bookingId = '';
-    let propertyId = '';
+    let bookingId = null;
+    let propertyId = null;
     let requestorRole = '';
-    let staffId = '';
+    let staffId = null;
 
     // Check for prefix (Staff: or Host:)
     const prefixMatch = body.match(/^\s*(Staff|Host)\s*:/i);
     if (prefixMatch) {
       requestorRole = prefixMatch[1].toLowerCase() === 'staff' ? 'Staff' : 'Host';
+      console.log(`[Webhook] Prefix detected: ${requestorRole}`);
     } else {
       // Try to find booking by phone (Guest)
-      const booking = lookupBookingByPhone(db, from);
+      const booking = await lookupBookingByPhone(db, from);
       if (booking) {
         bookingId = booking.id;
         propertyId = booking.property_id;
         requestorRole = 'Guest';
+        console.log(`[Webhook] Found booking: ${bookingId}, property: ${propertyId}`);
       }
 
       // Try to find staff record
       if (!requestorRole) {
-        const staff = lookupStaffByPhone(db, from, 'Staff');
+        const staff = await lookupStaffByPhone(db, from, 'Staff');
         if (staff) {
           requestorRole = 'Staff';
           propertyId = propertyId || staff.property_id;
           staffId = staff.id;
+          console.log(`[Webhook] Found staff: ${staff.name}`);
         }
       }
 
       // Try to find host record
       if (!requestorRole) {
-        const host = lookupStaffByPhone(db, from, 'Host');
+        const host = await lookupStaffByPhone(db, from, 'Host');
         if (host) {
           requestorRole = 'Host';
           propertyId = propertyId || host.property_id;
+          console.log(`[Webhook] Found host: ${host.name}`);
         }
       }
 
       // Default to Guest
       if (!requestorRole) {
         requestorRole = 'Guest';
+        console.log('[Webhook] Defaulting to Guest role');
       }
     }
 
-    // Insert message into database
-    const stmt = db.prepare(`
+    // Insert message into database with UUID
+    await db.prepare(`
       INSERT INTO messages (
         id, from_number, to_number, body, media_url, message_type,
         requestor_role, booking_id, property_id, staff_id, created_at
       ) VALUES (?, ?, ?, ?, ?, 'Inbound', ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    `);
-
-    stmt.run(
+    `).run(
       id,
       from,
       to,
       body,
       mediaUrls.join(', ') || null,
       requestorRole,
-      bookingId || null,
-      propertyId || null,
-      staffId || null
+      bookingId,
+      propertyId,
+      staffId
     );
 
-    console.log(`[Webhook] Logged message: ${id}, role=${requestorRole}, booking=${bookingId}`);
+    console.log(`[Webhook] Logged message: ${id}, role=${requestorRole}, property=${propertyId}`);
 
     // Send to external webhook (if configured)
     try {
@@ -139,17 +146,31 @@ router.post('/twilio', async (req, res) => {
         requestor_role: requestorRole,
       };
 
-      // Process asynchronously
-      processInboundMessage(message).catch(err => {
-        console.error('[Webhook] AI processing error:', err.message);
-      });
+      // Process asynchronously - don't block the response
+      processInboundMessage(message)
+        .then(async (responses) => {
+          console.log(`[Webhook] AI processed ${responses.length} response(s)`);
+          
+          // After AI processing, create tasks if needed
+          const tasksCreated = await createTasksFromAiLogs();
+          if (tasksCreated.length > 0) {
+            console.log(`[Webhook] Created ${tasksCreated.length} task(s)`);
+            
+            // Process task workflow (notify staff/host)
+            const workflowResults = await processTaskWorkflow();
+            console.log(`[Webhook] Task workflow processed: ${workflowResults.length} action(s)`);
+          }
+        })
+        .catch(err => {
+          console.error('[Webhook] AI processing error:', err.message, err.stack);
+        });
     }
 
-    // Return TwiML empty response
+    // Return TwiML empty response immediately
     res.type('text/xml');
     res.send('<Response></Response>');
   } catch (error) {
-    console.error('[Webhook] Error:', error);
+    console.error('[Webhook] Error:', error.message, error.stack);
     res.status(500).send('<Response></Response>');
   }
 });
@@ -163,9 +184,42 @@ router.get('/health', (req, res) => {
 });
 
 /**
+ * POST /api/webhook/process-tasks
+ * Manually trigger task creation and workflow processing
+ */
+router.post('/process-tasks', async (req, res) => {
+  try {
+    console.log('[Webhook] Manual task processing triggered');
+    
+    // Create tasks from AI logs
+    const tasksCreated = await createTasksFromAiLogs();
+    console.log(`[Webhook] Created ${tasksCreated.length} task(s)`);
+    
+    // Process task workflow
+    const workflowResults = await processTaskWorkflow();
+    console.log(`[Webhook] Workflow processed ${workflowResults.length} action(s)`);
+    
+    res.json({
+      success: true,
+      tasksCreated: tasksCreated.length,
+      workflowActions: workflowResults.length,
+      tasks: tasksCreated.map(t => ({
+        id: t.id,
+        bucket: t.task_bucket,
+        status: t.status,
+        staff: t.staff_name,
+      })),
+    });
+  } catch (error) {
+    console.error('[Webhook] Process tasks error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * Lookup booking by guest phone
  */
-function lookupBookingByPhone(db, phone) {
+async function lookupBookingByPhone(db, phone) {
   const tokens = canonPhoneTokens(phone);
   if (!tokens.digits) return null;
 
@@ -173,29 +227,29 @@ function lookupBookingByPhone(db, phone) {
   const today = new Date().toISOString().split('T')[0];
 
   // Active booking
-  let booking = db.prepare(`
+  let booking = await db.prepare(`
     SELECT * FROM bookings 
     WHERE guest_phone LIKE ? AND start_date <= ? AND end_date >= ?
     ORDER BY start_date DESC LIMIT 1
-  `).get([pattern, today, today]);
+  `).get(pattern, today, today);
 
   if (booking) return booking;
 
   // Upcoming booking
-  booking = db.prepare(`
+  booking = await db.prepare(`
     SELECT * FROM bookings 
     WHERE guest_phone LIKE ? AND start_date >= ?
     ORDER BY start_date ASC LIMIT 1
-  `).get([pattern, today]);
+  `).get(pattern, today);
 
   if (booking) return booking;
 
   // Most recent past booking
-  booking = db.prepare(`
+  booking = await db.prepare(`
     SELECT * FROM bookings 
     WHERE guest_phone LIKE ?
     ORDER BY end_date DESC LIMIT 1
-  `).get([pattern]);
+  `).get(pattern);
 
   return booking;
 }
@@ -203,18 +257,17 @@ function lookupBookingByPhone(db, phone) {
 /**
  * Lookup staff/host by phone and role
  */
-function lookupStaffByPhone(db, phone, role) {
+async function lookupStaffByPhone(db, phone, role) {
   const tokens = canonPhoneTokens(phone);
   if (!tokens.digits) return null;
 
   const pattern = `%${tokens.last10}%`;
 
-  return db.prepare(`
+  return await db.prepare(`
     SELECT * FROM staff 
     WHERE phone LIKE ? AND LOWER(role) = LOWER(?)
     LIMIT 1
-  `).get([pattern, role]);
+  `).get(pattern, role);
 }
 
 export default router;
-
