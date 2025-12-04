@@ -85,27 +85,33 @@ Your output **must be a single, valid JSON object** matching the schema below â€
 export const PROMPT_SUMMARIZE_MESSAGE_ACTIONS = `
 You receive one or more guest messages PLUS recent conversation history.
 
+Your job is to extract the ACTUAL requests from the CURRENT message. Read the message carefully and identify what the guest is ACTUALLY asking for.
+
 Return STRICT JSON:
 {
-  "Language": "<ISO like en>",
-  "Tone": "<overall tone>",
+  "Language": "<ISO 639-1 code like en, es, id>",
+  "Tone": "<Friendly|Polite|Formal|Casual|Frustrated|Neutral>",
   "Sentiment": "<Positive|Neutral|Negative>",
   "Action Titles": [
-    // Up to 5 high-level, de-duplicated action labels:
-    // e.g., "Request Wiâ€‘Fi password", "Request directions to villa", "Request towels"
+    // Extract 1-5 action titles from the CURRENT message ONLY
+    // Use the EXACT wording from the guest's message where possible
+    // Examples: "Need fresh sheets", "Check-in time question", "Pool needs cleaning"
   ]
 }
 
-Rules:
-- Consider the history to interpret the current intent, but output only the CURRENT actionable asks.
-- Ignore greetings/acknowledgements/"hello?"/"sorry?"/emoji-only.
-- Merge near-duplicates; concise, platform-neutral phrasing.
-- Do not invent tasks.
+CRITICAL RULES:
+- Extract actions from the CURRENT message text ONLY. Do NOT use examples from this prompt.
+- Use the guest's ACTUAL words. If they say "fresh sheets", use "Fresh sheets request", not something else.
+- If asking about check-in/check-out times, use "Check-in time inquiry" or similar - NOT a made-up task.
+- Questions about WiFi, amenities, rules = inquiries (not tasks).
+- Requests for physical items (towels, linens, cleaning) = task requests.
+- Ignore greetings, thank yous, acknowledgements - focus on actionable requests only.
+- NEVER copy the examples from this prompt. Analyze the actual message.
 
-History (JSON array of strings):
+History (JSON array of strings, for context only):
 {{HISTORICAL_MESSAGES}}
 
-Current message(s):
+Current message to analyze:
 {{MESSAGE}}
 `;
 

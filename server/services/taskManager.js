@@ -139,10 +139,10 @@ export async function processTaskWorkflow() {
   const db = getDb();
   const results = [];
 
-  // Get active tasks that need processing
+  // Get active tasks that need processing (INTEGER: 0=false, 1=true)
   const tasks = await db.prepare(`
     SELECT * FROM tasks 
-    WHERE status != 'Completed' AND (completion_notified = false OR completion_notified IS NULL)
+    WHERE status != 'Completed' AND (completion_notified = 0 OR completion_notified IS NULL)
     ORDER BY created_at ASC
   `).all();
 
@@ -174,14 +174,14 @@ async function processTask(task) {
     // Send completion notification if not already sent
     if (!task.completion_notified) {
       await sendCompletionNotification(task);
-      await db.prepare(`UPDATE tasks SET completion_notified = true WHERE id = ?`).run(task.id);
+      await db.prepare(`UPDATE tasks SET completion_notified = 1 WHERE id = ?`).run(task.id);
     }
     return { task, action: 'completed' };
   }
 
   // Check if we're waiting for a response
   const hasKickoff = task.ai_message_response && task.ai_message_response.length > 0;
-  const responseReceived = task.response_received === true;
+  const responseReceived = task.response_received === 1 || task.response_received === true;
 
   if (hasKickoff && !responseReceived) {
     // Still waiting for response, skip
@@ -339,14 +339,14 @@ async function handleHostPath(task, triageResult, lang) {
     },
   });
 
-  // Update task
+  // Update task (INTEGER: 1=true)
   await db.prepare(`
     UPDATE tasks SET 
       ai_message_response = ?, 
       action_holder_phone = ?,
-      action_holder_notified = true,
-      host_notified = true,
-      host_escalation_needed = true
+      action_holder_notified = 1,
+      host_notified = 1,
+      host_escalation_needed = 1
     WHERE id = ?
   `).run(message, hostPhone, task.id);
 }
@@ -380,12 +380,12 @@ async function handleGuestPath(task, missingItems, lang) {
     },
   });
 
-  // Update task
+  // Update task (INTEGER: 1=true)
   await db.prepare(`
     UPDATE tasks SET 
       ai_message_response = ?, 
       action_holder_phone = ?,
-      action_holder_notified = true,
+      action_holder_notified = 1,
       action_holder_missing_requirements = ?
     WHERE id = ?
   `).run(message, task.phone, missingItems.join('; '), task.id);
@@ -437,12 +437,12 @@ async function handleStaffPath(task, triageResult, lang) {
     },
   });
 
-  // Update task
+  // Update task (INTEGER: 1=true)
   await db.prepare(`
     UPDATE tasks SET 
       ai_message_response = ?, 
       action_holder_phone = ?,
-      action_holder_notified = true,
+      action_holder_notified = 1,
       action_holder_missing_requirements = ?
     WHERE id = ?
   `).run(message, task.staff_phone, task.staff_requirements || '', task.id);
@@ -488,7 +488,7 @@ export async function evaluateTaskStatus() {
 
   const tasks = await db.prepare(`
     SELECT * FROM tasks 
-    WHERE status != 'Completed' AND response_received = true
+    WHERE status != 'Completed' AND response_received = 1
   `).all();
 
   if (!tasks || !tasks.length) return updates;
