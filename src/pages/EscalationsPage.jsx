@@ -1,124 +1,107 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { 
+import {
   AlertTriangle,
-  Plus, 
-  Eye, 
+  Eye,
   MessageSquare,
   Clock,
   CheckCircle,
-  XCircle,
   AlertCircle,
-  User,
   Calendar,
-  Filter,
   Search,
-  MapPin
+  MapPin,
+  Loader2,
+  RefreshCw
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
 import { cn } from '../lib/utils'
+import { useNavigate } from 'react-router-dom'
 
-const escalations = [
-  {
-    id: 1,
-    title: 'Guest Reports Hot Water Issue',
-    type: 'Guest Issue',
-    priority: 'high',
-    status: 'open',
-    createdAt: '2024-01-16 09:15 AM',
-    property: 'Sunset Villa',
-    guest: 'Sarah Chen',
-    description: 'Guest reports no hot water in master bathroom. Needs immediate attention as guest has early checkout tomorrow.',
-    assignedTo: 'John Smith (Maintenance)',
-    lastUpdate: '2024-01-16 09:45 AM',
-    estimatedResolution: '2 hours',
-    messages: 3
-  },
-  {
-    id: 2,
-    title: 'High Cost Maintenance Request',
-    type: 'Cost Threshold',
-    priority: 'medium',
-    status: 'pending_approval',
-    createdAt: '2024-01-16 08:30 AM',
-    property: 'Mountain Retreat',
-    guest: null,
-    description: 'HVAC system repair estimated at $750. Requires host approval before proceeding.',
-    assignedTo: 'Mike Wilson (Maintenance)',
-    lastUpdate: '2024-01-16 08:30 AM',
-    estimatedCost: '$750',
-    messages: 1
-  },
-  {
-    id: 3,
-    title: 'Staff Response Timeout',
-    type: 'Staff Timeout',
-    priority: 'medium',
-    status: 'escalated',
-    createdAt: '2024-01-16 07:00 AM',
-    property: 'Beach House',
-    guest: 'Michael Rodriguez',
-    description: 'Cleaning staff has not responded to urgent cleaning request for 45 minutes. Guest checking in at 3 PM.',
-    assignedTo: 'Maria Garcia (Cleaning)',
-    lastUpdate: '2024-01-16 07:45 AM',
-    messages: 2
-  },
-  {
-    id: 4,
-    title: 'Guest Complaint - Noise Issues',
-    type: 'Guest Complaint',
-    priority: 'high',
-    status: 'resolved',
-    createdAt: '2024-01-15 11:30 PM',
-    property: 'Mountain Retreat',
-    guest: 'Jennifer Park',
-    description: 'Guest complained about noise from neighboring property. Issue resolved by contacting neighbor and providing earplugs.',
-    assignedTo: 'Host',
-    lastUpdate: '2024-01-16 06:00 AM',
-    resolvedAt: '2024-01-16 06:00 AM',
-    messages: 5
-  },
-  {
-    id: 5,
-    title: 'Emergency - Lock Malfunction',
-    type: 'Emergency',
-    priority: 'critical',
-    status: 'resolved',
-    createdAt: '2024-01-15 02:15 PM',
-    property: 'Sunset Villa',
-    guest: 'David Kim',
-    description: 'Guest unable to enter property due to smart lock malfunction. Emergency locksmith dispatched.',
-    assignedTo: 'Emergency Services',
-    lastUpdate: '2024-01-15 03:45 PM',
-    resolvedAt: '2024-01-15 03:45 PM',
-    messages: 8
-  }
-]
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
 
 export default function EscalationsPage() {
+  const navigate = useNavigate()
+  const [escalations, setEscalations] = useState([])
+  const [properties, setProperties] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [selectedFilter, setSelectedFilter] = useState('all')
   const [propertyFilter, setPropertyFilter] = useState('all')
   const [searchTerm, setSearchTerm] = useState('')
 
-  // Get unique properties for the filter dropdown
-  const properties = [...new Set(escalations.map(escalation => escalation.property))].sort()
+  // Fetch escalations
+  const fetchEscalations = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      const params = new URLSearchParams()
+      if (selectedFilter !== 'all') {
+        params.append('status', selectedFilter)
+      }
+      if (propertyFilter !== 'all') {
+        params.append('propertyId', propertyFilter)
+      }
+
+      const response = await fetch(`${API_BASE_URL}/escalations?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch escalations')
+      }
+
+      const data = await response.json()
+      setEscalations(data)
+    } catch (err) {
+      console.error('Error fetching escalations:', err)
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Fetch properties for filter
+  const fetchProperties = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/properties`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setProperties(data)
+      }
+    } catch (err) {
+      console.error('Error fetching properties:', err)
+    }
+  }
+
+  useEffect(() => {
+    fetchEscalations()
+    fetchProperties()
+  }, [selectedFilter, propertyFilter])
 
   const getStatusInfo = (status) => {
     switch (status) {
       case 'open':
         return { color: 'bg-red-100 text-red-700', label: 'Open', icon: AlertCircle }
-      case 'pending_approval':
-        return { color: 'bg-yellow-100 text-yellow-700', label: 'Pending Approval', icon: Clock }
-      case 'escalated':
-        return { color: 'bg-orange-100 text-orange-700', label: 'Escalated', icon: AlertTriangle }
+      case 'acknowledged':
+        return { color: 'bg-blue-100 text-blue-700', label: 'Acknowledged', icon: Eye }
+      case 'in_progress':
+        return { color: 'bg-yellow-100 text-yellow-700', label: 'In Progress', icon: Clock }
       case 'resolved':
         return { color: 'bg-green-100 text-green-700', label: 'Resolved', icon: CheckCircle }
       default:
-        return { color: 'bg-gray-100 text-gray-700', label: 'Unknown', icon: AlertCircle }
+        return { color: 'bg-gray-100 text-gray-700', label: status || 'Unknown', icon: AlertCircle }
     }
   }
 
@@ -137,37 +120,100 @@ export default function EscalationsPage() {
     }
   }
 
-  const filteredEscalations = escalations.filter(escalation => {
-    // Status filter
-    const statusMatch = selectedFilter === 'all' || escalation.status === selectedFilter
-    
-    // Property filter
-    const propertyMatch = propertyFilter === 'all' || escalation.property === propertyFilter
-    
-    // Search filter
-    const searchMatch = !searchTerm.trim() || 
-      escalation.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      escalation.property.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (escalation.guest && escalation.guest.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      escalation.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      escalation.assignedTo.toLowerCase().includes(searchTerm.toLowerCase())
+  const getRiskLabel = (riskIndicator) => {
+    const labels = {
+      'LegalThreat': 'Legal Threat',
+      'SafetyRisk': 'Safety Risk',
+      'ChurnRisk': 'Churn Risk',
+      'PublicComplaint': 'Public Complaint',
+      'HighImpact': 'High Impact',
+    }
+    return labels[riskIndicator] || riskIndicator || 'Task Escalation'
+  }
 
-    return statusMatch && propertyMatch && searchMatch
-  })
+  const formatDate = (dateString) => {
+    if (!dateString) return ''
+    const date = new Date(dateString)
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    })
+  }
 
-  const getEscalationCounts = () => {
-    return {
-      all: escalations.length,
-      open: escalations.filter(e => e.status === 'open').length,
-      pending_approval: escalations.filter(e => e.status === 'pending_approval').length,
-      escalated: escalations.filter(e => e.status === 'escalated').length,
-      resolved: escalations.filter(e => e.status === 'resolved').length,
+  // Handle resolve action
+  const handleResolve = async (escalationId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/escalations/${escalationId}/resolve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+        },
+        body: JSON.stringify({ resolutionNotes: 'Resolved via dashboard' }),
+      })
+
+      if (response.ok) {
+        // Refresh the list
+        fetchEscalations()
+      }
+    } catch (err) {
+      console.error('Error resolving escalation:', err)
     }
   }
 
-  const counts = getEscalationCounts()
-  const openEscalations = escalations.filter(e => e.status === 'open' || e.status === 'escalated' || e.status === 'pending_approval')
-  const resolvedToday = escalations.filter(e => e.status === 'resolved' && e.resolvedAt?.includes('2024-01-16'))
+  // Handle acknowledge action
+  const handleAcknowledge = async (escalationId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/escalations/${escalationId}/acknowledge`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+        },
+      })
+
+      if (response.ok) {
+        fetchEscalations()
+      }
+    } catch (err) {
+      console.error('Error acknowledging escalation:', err)
+    }
+  }
+
+  // Filter escalations by search term
+  const filteredEscalations = escalations.filter(escalation => {
+    if (!searchTerm.trim()) return true
+    const search = searchTerm.toLowerCase()
+    return (
+      (escalation.reason?.toLowerCase().includes(search)) ||
+      (escalation.originalMessage?.toLowerCase().includes(search)) ||
+      (escalation.guestName?.toLowerCase().includes(search)) ||
+      (escalation.propertyName?.toLowerCase().includes(search)) ||
+      (escalation.riskIndicator?.toLowerCase().includes(search))
+    )
+  })
+
+  // Count escalations by status
+  const counts = {
+    all: escalations.length,
+    open: escalations.filter(e => e.status === 'open').length,
+    acknowledged: escalations.filter(e => e.status === 'acknowledged').length,
+    in_progress: escalations.filter(e => e.status === 'in_progress').length,
+    resolved: escalations.filter(e => e.status === 'resolved').length,
+  }
+
+  if (loading && escalations.length === 0) {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-brand-purple mb-4" />
+          <p className="text-brand-mid-gray">Loading escalations...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-4 sm:p-6">
@@ -183,7 +229,29 @@ export default function EscalationsPage() {
             <h1 className="text-xl sm:text-2xl font-bold text-brand-dark">Escalations</h1>
             <p className="text-sm sm:text-base text-brand-mid-gray">Monitor and manage escalated issues requiring your attention</p>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchEscalations}
+            disabled={loading}
+          >
+            <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+            Refresh
+          </Button>
         </div>
+
+        {/* Error State */}
+        {error && (
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="p-4 flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-red-500" />
+              <p className="text-red-700">{error}</p>
+              <Button size="sm" variant="outline" onClick={fetchEscalations}>
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Filters and Search */}
         <div className="flex flex-col gap-4">
@@ -192,8 +260,8 @@ export default function EscalationsPage() {
             {[
               { key: 'all', label: 'All Escalations', count: counts.all },
               { key: 'open', label: 'Open', count: counts.open },
-              { key: 'pending_approval', label: 'Pending Approval', count: counts.pending_approval },
-              { key: 'escalated', label: 'Escalated', count: counts.escalated },
+              { key: 'acknowledged', label: 'Acknowledged', count: counts.acknowledged },
+              { key: 'in_progress', label: 'In Progress', count: counts.in_progress },
               { key: 'resolved', label: 'Resolved', count: counts.resolved }
             ].map((filterOption) => (
               <Button
@@ -205,12 +273,12 @@ export default function EscalationsPage() {
               >
                 <span className="hidden sm:inline">{filterOption.label}</span>
                 <span className="sm:hidden">{filterOption.label.split(' ')[0]}</span>
-                <Badge 
-                  variant="secondary" 
+                <Badge
+                  variant="secondary"
                   className={cn(
                     "ml-1 sm:ml-2 text-xs pointer-events-none",
-                    selectedFilter === filterOption.key 
-                      ? "bg-white/20 text-white" 
+                    selectedFilter === filterOption.key
+                      ? "bg-white/20 text-white"
                       : "bg-brand-mid-gray/10 text-brand-mid-gray"
                   )}
                 >
@@ -231,8 +299,8 @@ export default function EscalationsPage() {
               >
                 <option value="all">All Properties</option>
                 {properties.map((property) => (
-                  <option key={property} value={property}>
-                    {property}
+                  <option key={property.id} value={property.id}>
+                    {property.name}
                   </option>
                 ))}
               </select>
@@ -241,7 +309,7 @@ export default function EscalationsPage() {
             {/* Search */}
             <div className="flex items-center gap-2 flex-1 min-w-0">
               <Search className="h-4 w-4 text-brand-mid-gray flex-shrink-0" />
-              <Input 
+              <Input
                 placeholder="Search escalations..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -268,78 +336,121 @@ export default function EscalationsPage() {
               const statusInfo = getStatusInfo(escalation.status)
               const priorityInfo = getPriorityInfo(escalation.priority)
               const StatusIcon = statusInfo.icon
-              
+
               return (
                 <Card key={escalation.id} className={`border-l-4 ${priorityInfo.color}`}>
                   <CardContent className="p-4 sm:p-6">
                     <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                       <div className="flex-1 min-w-0">
                         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-3">
-                          <h3 className="text-base sm:text-lg font-semibold text-brand-dark pr-2">{escalation.title}</h3>
+                          <h3 className="text-base sm:text-lg font-semibold text-brand-dark pr-2">
+                            {getRiskLabel(escalation.riskIndicator)}
+                          </h3>
                           <div className="flex items-center gap-2 flex-wrap">
                             <Badge className={`text-xs ${priorityInfo.badge}`}>
-                              {escalation.priority.toUpperCase()}
+                              {(escalation.priority || 'medium').toUpperCase()}
                             </Badge>
                             <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${statusInfo.color}`}>
                               <StatusIcon className="h-3 w-3" />
                               {statusInfo.label}
                             </div>
+                            {escalation.triggerType === 'message_risk' && (
+                              <Badge variant="outline" className="text-xs">
+                                Message Risk
+                              </Badge>
+                            )}
+                            {escalation.triggerType === 'task_triage' && (
+                              <Badge variant="outline" className="text-xs">
+                                Task Triage
+                              </Badge>
+                            )}
                           </div>
                         </div>
-                        
-                        <p className="text-brand-mid-gray mb-4 text-sm sm:text-base">{escalation.description}</p>
-                        
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 text-sm">
-                          <div>
-                            <Label className="text-xs text-brand-mid-gray">Property</Label>
-                            <p className="font-medium truncate">{escalation.property}</p>
+
+                        {escalation.reason && (
+                          <p className="text-brand-mid-gray mb-2 text-sm sm:text-base">{escalation.reason}</p>
+                        )}
+
+                        {escalation.originalMessage && (
+                          <div className="bg-gray-50 rounded-lg p-3 mb-4">
+                            <Label className="text-xs text-brand-mid-gray mb-1 block">Original Message</Label>
+                            <p className="text-sm text-brand-dark italic">"{escalation.originalMessage}"</p>
                           </div>
-                          {escalation.guest && (
+                        )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 text-sm">
+                          {escalation.propertyName && (
+                            <div>
+                              <Label className="text-xs text-brand-mid-gray">Property</Label>
+                              <p className="font-medium truncate">{escalation.propertyName}</p>
+                            </div>
+                          )}
+                          {escalation.guestName && (
                             <div>
                               <Label className="text-xs text-brand-mid-gray">Guest</Label>
-                              <p className="font-medium truncate">{escalation.guest}</p>
+                              <p className="font-medium truncate">{escalation.guestName}</p>
                             </div>
                           )}
-                          <div>
-                            <Label className="text-xs text-brand-mid-gray">Assigned To</Label>
-                            <p className="font-medium truncate">{escalation.assignedTo}</p>
-                          </div>
+                          {escalation.guestPhone && (
+                            <div>
+                              <Label className="text-xs text-brand-mid-gray">Phone</Label>
+                              <p className="font-medium truncate">{escalation.guestPhone}</p>
+                            </div>
+                          )}
                           <div>
                             <Label className="text-xs text-brand-mid-gray">Created</Label>
-                            <p className="font-medium text-xs sm:text-sm">{escalation.createdAt}</p>
+                            <p className="font-medium text-xs sm:text-sm">{formatDate(escalation.createdAt)}</p>
                           </div>
-                          {escalation.estimatedResolution && (
+                          {escalation.hostNotified && (
                             <div>
-                              <Label className="text-xs text-brand-mid-gray">Est. Resolution</Label>
-                              <p className="font-medium">{escalation.estimatedResolution}</p>
-                            </div>
-                          )}
-                          {escalation.estimatedCost && (
-                            <div>
-                              <Label className="text-xs text-brand-mid-gray">Estimated Cost</Label>
-                              <p className="font-medium text-orange-600">{escalation.estimatedCost}</p>
+                              <Label className="text-xs text-brand-mid-gray">Host Notified</Label>
+                              <p className="font-medium text-green-600 text-xs sm:text-sm">
+                                {formatDate(escalation.hostNotifiedAt) || 'Yes'}
+                              </p>
                             </div>
                           )}
                         </div>
-                        
+
                         {escalation.resolvedAt && (
                           <div className="mt-3 text-sm">
                             <Label className="text-xs text-brand-mid-gray">Resolved</Label>
-                            <p className="font-medium text-green-600 text-xs sm:text-sm">{escalation.resolvedAt}</p>
+                            <p className="font-medium text-green-600 text-xs sm:text-sm">{formatDate(escalation.resolvedAt)}</p>
+                            {escalation.resolutionNotes && (
+                              <p className="text-brand-mid-gray text-xs mt-1">{escalation.resolutionNotes}</p>
+                            )}
                           </div>
                         )}
                       </div>
-                      
+
                       <div className="flex sm:flex-col gap-2 sm:ml-4 self-start">
-                        <Button size="sm" variant="outline" className="flex-1 sm:flex-none">
-                          <MessageSquare className="h-4 w-4 mr-1" />
-                          <span className="sm:hidden">Messages</span>
-                          <span className="hidden sm:inline">{escalation.messages}</span>
-                        </Button>
-                        <Button size="sm" className="flex-1 sm:flex-none">
-                          <Eye className="h-4 w-4" />
-                          <span className="sm:hidden ml-1">View</span>
-                        </Button>
+                        {escalation.status === 'open' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleAcknowledge(escalation.id)}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            Acknowledge
+                          </Button>
+                        )}
+                        {escalation.status !== 'resolved' && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleResolve(escalation.id)}
+                          >
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Resolve
+                          </Button>
+                        )}
+                        {escalation.taskId && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => navigate(`/tasks/${escalation.taskId}`)}
+                          >
+                            View Task
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </CardContent>
@@ -351,4 +462,4 @@ export default function EscalationsPage() {
       </motion.div>
     </div>
   )
-} 
+}

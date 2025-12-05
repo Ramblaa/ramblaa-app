@@ -177,6 +177,8 @@ router.get('/:id', async (req, res) => {
       createdAt: msg.created_at,
       taskIds: msg.reference_task_ids ? msg.reference_task_ids.split(',').filter(Boolean) : [],
       taskAction: msg.task_action || null,  // 'created' or 'updated'
+      escalationId: msg.escalation_id || null,
+      escalated: !!msg.escalation_id,
     }));
 
     res.json({

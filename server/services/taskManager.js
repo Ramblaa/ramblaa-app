@@ -10,6 +10,7 @@ import { getDbWithPrepare as getDb } from '../db/index.js';
 import { chatJSON, callGPTTurbo, detectLanguage } from './openai.js';
 import { sendWhatsAppMessage } from './twilio.js';
 import { fillTemplate } from '../utils/templateFiller.js';
+import { createEscalation } from './escalationService.js';
 import {
   PROMPT_TASK_TRIAGE,
   PROMPT_GUEST_REQUIREMENTS_EVAL,
@@ -409,6 +410,26 @@ async function handleHostPath(task, triageResult, lang) {
     return;
   }
 
+  // Create escalation record (DELAYED ESCALATION - task triage)
+  let escalationId = null;
+  try {
+    console.log(`[TaskManager] 🚨 Creating escalation for task ${task.id}`);
+    const escalation = await createEscalation({
+      triggerType: 'task_triage',
+      taskId: task.id,
+      bookingId: task.booking_id,
+      propertyId: task.property_id,
+      guestPhone: task.phone,
+      originalMessage: task.guest_message,
+      reason: triageResult?.hostReason || 'Task requires host intervention',
+    });
+    escalationId = escalation.id;
+    console.log(`[TaskManager] ✓ Escalation ${escalationId} created for task ${task.id}`);
+  } catch (escalationError) {
+    console.error(`[TaskManager] ✗ Failed to create escalation:`, escalationError.message);
+    // Continue with host notification even if escalation fails
+  }
+
   // Generate host message
   const prompt = fillTemplate(PROMPT_HOST_ESCALATION, {
     LANG: lang,
@@ -440,19 +461,22 @@ async function handleHostPath(task, triageResult, lang) {
     metadata: {
       propertyId: task.property_id,
       taskId: task.id,
+      escalationId: escalationId,
     },
   });
 
-  // Update task (INTEGER: 1=true)
+  // Update task with escalation reference (INTEGER: 1=true)
   await db.prepare(`
-    UPDATE tasks SET 
-      ai_message_response = ?, 
+    UPDATE tasks SET
+      ai_message_response = ?,
       action_holder_phone = ?,
       action_holder_notified = 1,
       host_notified = 1,
-      host_escalation_needed = 1
+      host_escalation_needed = 1,
+      escalation_id = ?,
+      status = 'Escalated'
     WHERE id = ?
-  `).run(message, hostPhone, task.id);
+  `).run(message, hostPhone, escalationId, task.id);
 }
 
 /**

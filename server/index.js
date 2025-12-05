@@ -12,6 +12,7 @@ import webhookRoutes from './routes/webhook.js';
 import messagesRoutes from './routes/messages.js';
 import tasksRoutes from './routes/tasks.js';
 import propertiesRoutes from './routes/properties.js';
+import escalationsRoutes from './routes/escalations.js';
 
 const app = express();
 
@@ -98,6 +99,7 @@ app.use('/api/webhook', webhookLimiter, webhookRoutes);
 app.use('/api/messages', messagesRoutes);
 app.use('/api/tasks', tasksRoutes);
 app.use('/api/properties', propertiesRoutes);
+app.use('/api/escalations', escalationsRoutes);
 
 // Error handler
 app.use((err, req, res, next) => {

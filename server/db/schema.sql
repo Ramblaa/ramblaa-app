@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS messages (
   reference_task_ids TEXT,
   task_action TEXT,  -- 'created' or 'updated' to show correct label in UI
   ai_enrichment_id TEXT,
+  escalation_id TEXT,  -- Links to escalation if message triggered one
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (booking_id) REFERENCES bookings(id),
   FOREIGN KEY (property_id) REFERENCES properties(id)
@@ -226,6 +227,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   action_holder_phone TEXT,
   host_notified INTEGER DEFAULT 0,
   host_escalation_needed INTEGER DEFAULT 0,
+  escalation_id TEXT,  -- Links to escalation if task triggered one
   status TEXT DEFAULT 'Waiting on Guest',
   ai_message_response TEXT,
   response_received INTEGER DEFAULT 0,
@@ -302,3 +304,50 @@ CREATE INDEX IF NOT EXISTS idx_ai_logs_status ON ai_logs(status);
 CREATE INDEX IF NOT EXISTS idx_ai_logs_recipient ON ai_logs(recipient_type);
 
 CREATE INDEX IF NOT EXISTS idx_summarized_status ON summarized_logs(status);
+
+-- Escalations (for host escalation tracking)
+CREATE TABLE IF NOT EXISTS escalations (
+  id TEXT PRIMARY KEY,
+
+  -- Source linking
+  message_id TEXT,                        -- Original message that triggered escalation
+  task_id TEXT,                           -- Task that triggered escalation (if task-based)
+  booking_id TEXT,
+  property_id TEXT,
+
+  -- Guest info
+  guest_phone TEXT,
+  guest_name TEXT,
+
+  -- Escalation details
+  trigger_type TEXT NOT NULL,             -- 'message_risk' | 'task_triage'
+  risk_indicator TEXT,                    -- ChurnRisk, LegalThreat, SafetyRisk, etc.
+  reason TEXT,                            -- Human-readable reason
+  original_message TEXT,                  -- The guest message that caused escalation
+
+  -- Status workflow
+  status TEXT DEFAULT 'open',             -- 'open' | 'acknowledged' | 'in_progress' | 'resolved'
+  priority TEXT DEFAULT 'high',           -- 'critical' | 'high' | 'medium' | 'low'
+
+  -- Host handling
+  host_notified INTEGER DEFAULT 0,
+  host_notified_at TIMESTAMP,
+  acknowledged_at TIMESTAMP,
+  resolved_at TIMESTAMP,
+  resolution_notes TEXT,
+
+  -- Audit
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY (message_id) REFERENCES messages(id),
+  FOREIGN KEY (task_id) REFERENCES tasks(id),
+  FOREIGN KEY (booking_id) REFERENCES bookings(id),
+  FOREIGN KEY (property_id) REFERENCES properties(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_escalations_status ON escalations(status);
+CREATE INDEX IF NOT EXISTS idx_escalations_property ON escalations(property_id);
+CREATE INDEX IF NOT EXISTS idx_escalations_booking ON escalations(booking_id);
+CREATE INDEX IF NOT EXISTS idx_escalations_priority ON escalations(priority);
+CREATE INDEX IF NOT EXISTS idx_escalations_created ON escalations(created_at);

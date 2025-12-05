@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Phone, MessageCircle, Send, ArrowLeft, Bot, BotOff, User, CheckSquare, ExternalLink, Search, Loader2, Link2, Calendar } from 'lucide-react'
+import { Phone, MessageCircle, Send, ArrowLeft, Bot, BotOff, User, CheckSquare, ExternalLink, Search, Loader2, Link2, Calendar, AlertTriangle } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
@@ -295,6 +295,23 @@ export default function MessagesPage() {
     )
   }
 
+  const renderEscalationIndicator = (escalationId) => {
+    if (!escalationId) return null
+
+    return (
+      <div className="mt-2 pt-2 border-t border-red-200">
+        <button
+          onClick={() => navigate(`/escalations`)}
+          className="flex items-center gap-1.5 text-xs text-red-600 hover:text-red-700 transition-colors group"
+        >
+          <AlertTriangle className="h-3.5 w-3.5" />
+          <span className="font-medium">Escalated to Host</span>
+          <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+        </button>
+      </div>
+    )
+  }
+
   const getInitials = (name) => {
     const names = (name || 'Unknown').split(' ')
     if (names.length >= 2) {
@@ -520,6 +537,9 @@ export default function MessagesPage() {
                         
                         {/* Task Links */}
                         {renderTaskLinks(message.taskIds, message.taskAction)}
+
+                        {/* Escalation Indicator */}
+                        {renderEscalationIndicator(message.escalationId)}
                       </div>
                     </div>
                   </motion.div>

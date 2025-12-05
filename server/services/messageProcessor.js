@@ -11,6 +11,7 @@ import { getDbWithPrepare as getDb } from '../db/index.js';
 import { chatJSON, callGPTTurbo, detectLanguage } from './openai.js';
 import { sendWhatsAppMessage } from './twilio.js';
 import { fillTemplate } from '../utils/templateFiller.js';
+import { createEscalation, shouldEscalate } from './escalationService.js';
 import {
   PROMPT_SUMMARIZE_MESSAGE_ACTIONS,
   PROMPT_AI_RESPONSE_FROM_SUMMARY,
@@ -298,6 +299,35 @@ async function processActionTitle({ actionTitle, message, context, summary }) {
   } catch (insertError) {
     console.error(`[MessageProcessor] ✗ Failed to insert ai_log:`, insertError.message);
     throw insertError;
+  }
+
+  // Check if escalation is needed based on risk indicators (IMMEDIATE ESCALATION)
+  if (shouldEscalate(response.escalationRiskIndicators)) {
+    console.log(`[MessageProcessor] 🚨 Escalation triggered - Risk: ${response.escalationRiskIndicators}`);
+    try {
+      const escalation = await createEscalation({
+        triggerType: 'message_risk',
+        riskIndicator: response.escalationRiskIndicators,
+        messageId: message.id,
+        bookingId: context.bookingId,
+        propertyId: context.propertyId,
+        guestPhone: message.from_number,
+        originalMessage: message.body,
+        reason: `AI detected ${response.escalationRiskIndicators} in guest message`,
+      });
+
+      // Link escalation to the original message
+      await db.prepare(`UPDATE messages SET escalation_id = ? WHERE id = ?`)
+        .run(escalation.id, message.id);
+
+      // Also store escalation ID in response for reference
+      response.escalationId = escalation.id;
+
+      console.log(`[MessageProcessor] ✓ Escalation ${escalation.id} created and linked to message`);
+    } catch (escalationError) {
+      console.error(`[MessageProcessor] ✗ Failed to create escalation:`, escalationError.message);
+      // Don't throw - escalation failure shouldn't block message processing
+    }
   }
 
   return response;
