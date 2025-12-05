@@ -32,9 +32,10 @@ export async function onBookingCreated(booking) {
   console.log(`[ScheduleService] Evaluating rules for new booking ${booking.id}`);
   
   try {
-    // Get all active rules for this property
+    // Get all active rules for this property (include created_at for backfill prevention)
     const rules = await db.prepare(`
-      SELECT r.*, t.content_sid, t.variables_schema, t.name as template_name
+      SELECT r.*, r.created_at as rule_created_at, 
+             t.content_sid, t.variables_schema, t.name as template_name
       FROM message_schedule_rules r
       JOIN message_templates t ON r.template_id = t.id
       WHERE r.property_id = ? AND r.is_active = 1 AND t.is_active = 1
@@ -305,6 +306,18 @@ function calculateScheduledTime(rule, booking) {
  * @returns {boolean} - True if conditions are met
  */
 function meetsConditions(rule, booking) {
+  // IMPORTANT: Only apply rules to bookings created AFTER the rule was created
+  // This prevents backfilling old bookings when new rules are added
+  if (rule.created_at && booking.created_at) {
+    const ruleCreated = new Date(rule.created_at);
+    const bookingCreated = new Date(booking.created_at);
+    
+    if (bookingCreated < ruleCreated) {
+      console.log(`[ScheduleService] Rule ${rule.name}: skipped (booking created before rule)`);
+      return false;
+    }
+  }
+  
   // Check minimum stay nights
   if (rule.min_stay_nights) {
     const nights = calculateNights(booking.start_date, booking.end_date);

@@ -112,7 +112,7 @@ export default function ScheduledMessagesPage() {
   // Template CRUD
   const handleCreateTemplate = async () => {
     try {
-      await apiService.request('/scheduled/templates', {
+      const newTemplate = await apiService.request('/scheduled/templates', {
         method: 'POST',
         body: JSON.stringify({
           ...templateForm,
@@ -123,7 +123,19 @@ export default function ScheduledMessagesPage() {
       })
       setShowTemplateModal(false)
       resetTemplateForm()
-      fetchData()
+      await fetchData()
+      
+      // Prompt user to create a rule for this template
+      if (confirm(`Template "${templateForm.name}" created!\n\nWould you like to create a schedule rule for this template now?\n\n(Templates only work when linked to a rule that defines when to send)`)) {
+        setRuleForm({
+          ...ruleForm,
+          propertyId: templateForm.propertyId,
+          templateId: newTemplate.id,
+          name: `${templateForm.name} - On Booking`,
+        })
+        setActiveTab('rules')
+        setShowRuleModal(true)
+      }
     } catch (err) {
       setError(err.message)
     }
@@ -479,9 +491,34 @@ export default function ScheduledMessagesPage() {
                             ContentSid: {template.contentSid}
                           </p>
                         )}
-                        <p className="text-xs text-brand-mid-gray mt-2">
-                          {template.ruleCount} rule(s) using this template
-                        </p>
+                        {template.ruleCount === 0 ? (
+                          <div className="flex items-center gap-2 mt-2">
+                            <AlertCircle className="w-3 h-3 text-amber-500" />
+                            <p className="text-xs text-amber-600">
+                              No rules - this template won't be sent
+                            </p>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setRuleForm({
+                                  ...ruleForm,
+                                  propertyId: template.propertyId,
+                                  templateId: template.id,
+                                  name: `${template.name} - Schedule`,
+                                })
+                                setActiveTab('rules')
+                                setShowRuleModal(true)
+                              }}
+                              className="text-xs text-brand-purple hover:underline font-medium"
+                            >
+                              Create Rule →
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-brand-mid-gray mt-2">
+                            {template.ruleCount} rule(s) using this template
+                          </p>
+                        )}
                       </div>
                       
                       <div className="flex items-center gap-2">
