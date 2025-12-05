@@ -12,7 +12,6 @@ import {
   Send,
   AlertCircle,
   RefreshCw,
-  ChevronDown,
   Play,
   Pause
 } from 'lucide-react'
@@ -36,7 +35,7 @@ const STATUS_STYLES = {
 }
 
 export default function ScheduledMessagesPage() {
-  const [activeTab, setActiveTab] = useState('templates')
+  const [activeTab, setActiveTab] = useState('schedules')
   const [templates, setTemplates] = useState([])
   const [rules, setRules] = useState([])
   const [scheduledMessages, setScheduledMessages] = useState([])
@@ -46,24 +45,19 @@ export default function ScheduledMessagesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   
-  // Modal states
-  const [showTemplateModal, setShowTemplateModal] = useState(false)
-  const [showRuleModal, setShowRuleModal] = useState(false)
-  const [editingTemplate, setEditingTemplate] = useState(null)
-  const [editingRule, setEditingRule] = useState(null)
+  // Combined modal state
+  const [showScheduleModal, setShowScheduleModal] = useState(false)
+  const [editingSchedule, setEditingSchedule] = useState(null) // { template, rule }
+  const [saving, setSaving] = useState(false)
   
-  // Form states
-  const [templateForm, setTemplateForm] = useState({
+  // Combined form state (template + rule in one)
+  const [scheduleForm, setScheduleForm] = useState({
+    // Template fields
     propertyId: '',
-    name: '',
+    templateName: '',
     contentSid: '',
-    variablesSchema: [],
-  })
-  
-  const [ruleForm, setRuleForm] = useState({
-    propertyId: '',
-    templateId: '',
-    name: '',
+    // Rule fields
+    ruleName: '',
     triggerType: 'ON_BOOKING_CREATED',
     triggerOffsetDays: 0,
     triggerTime: '09:00',
@@ -79,13 +73,9 @@ export default function ScheduledMessagesPage() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      // Fetch properties first - this is critical for the dropdowns
-      // Note: Don't include /api prefix - apiService already has it as baseURL
       const propsRes = await apiService.request('/properties')
       setProperties(propsRes || [])
-      console.log('[ScheduledMessages] Properties loaded:', propsRes?.length || 0)
       
-      // Fetch other data in parallel, with individual error handling
       const results = await Promise.allSettled([
         apiService.request('/scheduled/templates'),
         apiService.request('/scheduled/rules'),
@@ -109,108 +99,120 @@ export default function ScheduledMessagesPage() {
     }
   }
 
-  // Template CRUD
-  const handleCreateTemplate = async () => {
+  // Combine templates with their rules for display
+  const getSchedulesWithRules = () => {
+    return rules.map(rule => {
+      const template = templates.find(t => t.id === rule.templateId)
+      return {
+        ...rule,
+        template,
+        templateName: template?.name || rule.templateName,
+        contentSid: template?.contentSid,
+      }
+    })
+  }
+
+  // Create new schedule (template + rule in one flow)
+  const handleCreateSchedule = async () => {
     try {
+      setSaving(true)
+      
+      // Step 1: Create template
       const newTemplate = await apiService.request('/scheduled/templates', {
         method: 'POST',
         body: JSON.stringify({
-          ...templateForm,
-          variablesSchema: templateForm.variablesSchema.length > 0 
-            ? templateForm.variablesSchema 
-            : ['1', '2', '3', '4', '5'],
+          propertyId: scheduleForm.propertyId,
+          name: scheduleForm.templateName,
+          contentSid: scheduleForm.contentSid,
+          variablesSchema: ['1', '2', '3', '4', '5'],
         }),
       })
-      setShowTemplateModal(false)
-      resetTemplateForm()
-      await fetchData()
       
-      // Prompt user to create a rule for this template
-      if (confirm(`Template "${templateForm.name}" created!\n\nWould you like to create a schedule rule for this template now?\n\n(Templates only work when linked to a rule that defines when to send)`)) {
-        setRuleForm({
-          ...ruleForm,
-          propertyId: templateForm.propertyId,
-          templateId: newTemplate.id,
-          name: `${templateForm.name} - On Booking`,
-        })
-        setActiveTab('rules')
-        setShowRuleModal(true)
-      }
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  const handleUpdateTemplate = async () => {
-    try {
-      await apiService.request(`/scheduled/templates/${editingTemplate.id}`, {
-        method: 'PUT',
-        body: JSON.stringify(templateForm),
-      })
-      setShowTemplateModal(false)
-      setEditingTemplate(null)
-      resetTemplateForm()
-      fetchData()
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  const handleDeleteTemplate = async (id) => {
-    if (!confirm('Are you sure you want to delete this template?')) return
-    try {
-      await apiService.request(`/scheduled/templates/${id}`, { method: 'DELETE' })
-      fetchData()
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  // Rule CRUD
-  const handleCreateRule = async () => {
-    try {
+      // Step 2: Create rule linked to template
       await apiService.request('/scheduled/rules', {
         method: 'POST',
-        body: JSON.stringify(ruleForm),
+        body: JSON.stringify({
+          propertyId: scheduleForm.propertyId,
+          templateId: newTemplate.id,
+          name: scheduleForm.ruleName || `${scheduleForm.templateName} - ${TRIGGER_TYPE_LABELS[scheduleForm.triggerType]}`,
+          triggerType: scheduleForm.triggerType,
+          triggerOffsetDays: scheduleForm.triggerOffsetDays,
+          triggerTime: scheduleForm.triggerTime,
+          minStayNights: scheduleForm.minStayNights,
+          priority: scheduleForm.priority,
+        }),
       })
-      setShowRuleModal(false)
-      resetRuleForm()
+      
+      setShowScheduleModal(false)
+      resetForm()
       fetchData()
     } catch (err) {
       setError(err.message)
+    } finally {
+      setSaving(false)
     }
   }
 
-  const handleUpdateRule = async () => {
+  // Update existing schedule
+  const handleUpdateSchedule = async () => {
     try {
-      await apiService.request(`/scheduled/rules/${editingRule.id}`, {
+      setSaving(true)
+      
+      // Update template
+      if (editingSchedule.template) {
+        await apiService.request(`/scheduled/templates/${editingSchedule.template.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: scheduleForm.templateName,
+            contentSid: scheduleForm.contentSid,
+          }),
+        })
+      }
+      
+      // Update rule
+      await apiService.request(`/scheduled/rules/${editingSchedule.id}`, {
         method: 'PUT',
-        body: JSON.stringify(ruleForm),
+        body: JSON.stringify({
+          name: scheduleForm.ruleName,
+          triggerType: scheduleForm.triggerType,
+          triggerOffsetDays: scheduleForm.triggerOffsetDays,
+          triggerTime: scheduleForm.triggerTime,
+          minStayNights: scheduleForm.minStayNights,
+          priority: scheduleForm.priority,
+        }),
       })
-      setShowRuleModal(false)
-      setEditingRule(null)
-      resetRuleForm()
+      
+      setShowScheduleModal(false)
+      setEditingSchedule(null)
+      resetForm()
+      fetchData()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteSchedule = async (schedule) => {
+    if (!confirm(`Delete "${schedule.name}"?\n\nThis will also delete the associated template.`)) return
+    try {
+      // Delete rule first
+      await apiService.request(`/scheduled/rules/${schedule.id}`, { method: 'DELETE' })
+      // Delete template
+      if (schedule.templateId) {
+        await apiService.request(`/scheduled/templates/${schedule.templateId}`, { method: 'DELETE' })
+      }
       fetchData()
     } catch (err) {
       setError(err.message)
     }
   }
 
-  const handleDeleteRule = async (id) => {
-    if (!confirm('Are you sure you want to delete this rule?')) return
+  const handleToggleSchedule = async (schedule) => {
     try {
-      await apiService.request(`/scheduled/rules/${id}`, { method: 'DELETE' })
-      fetchData()
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  const handleToggleRule = async (rule) => {
-    try {
-      await apiService.request(`/scheduled/rules/${rule.id}`, {
+      await apiService.request(`/scheduled/rules/${schedule.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ isActive: !rule.isActive }),
+        body: JSON.stringify({ isActive: !schedule.isActive }),
       })
       fetchData()
     } catch (err) {
@@ -218,7 +220,6 @@ export default function ScheduledMessagesPage() {
     }
   }
 
-  // Scheduled message actions
   const handleCancelMessage = async (id) => {
     try {
       await apiService.request(`/scheduled/messages/${id}/cancel`, { method: 'POST' })
@@ -248,21 +249,12 @@ export default function ScheduledMessagesPage() {
     }
   }
 
-  // Form helpers
-  const resetTemplateForm = () => {
-    setTemplateForm({
+  const resetForm = () => {
+    setScheduleForm({
       propertyId: '',
-      name: '',
+      templateName: '',
       contentSid: '',
-      variablesSchema: [],
-    })
-  }
-
-  const resetRuleForm = () => {
-    setRuleForm({
-      propertyId: '',
-      templateId: '',
-      name: '',
+      ruleName: '',
       triggerType: 'ON_BOOKING_CREATED',
       triggerOffsetDays: 0,
       triggerTime: '09:00',
@@ -271,30 +263,26 @@ export default function ScheduledMessagesPage() {
     })
   }
 
-  const openEditTemplate = (template) => {
-    setEditingTemplate(template)
-    setTemplateForm({
-      propertyId: template.propertyId,
-      name: template.name,
-      contentSid: template.contentSid || '',
-      variablesSchema: template.variablesSchema || [],
+  const openEditSchedule = (schedule) => {
+    setEditingSchedule(schedule)
+    setScheduleForm({
+      propertyId: schedule.propertyId,
+      templateName: schedule.template?.name || schedule.templateName || '',
+      contentSid: schedule.template?.contentSid || schedule.contentSid || '',
+      ruleName: schedule.name,
+      triggerType: schedule.triggerType,
+      triggerOffsetDays: schedule.triggerOffsetDays || 0,
+      triggerTime: schedule.triggerTime?.slice(0, 5) || '09:00',
+      minStayNights: schedule.minStayNights,
+      priority: schedule.priority || 100,
     })
-    setShowTemplateModal(true)
+    setShowScheduleModal(true)
   }
 
-  const openEditRule = (rule) => {
-    setEditingRule(rule)
-    setRuleForm({
-      propertyId: rule.propertyId,
-      templateId: rule.templateId,
-      name: rule.name,
-      triggerType: rule.triggerType,
-      triggerOffsetDays: rule.triggerOffsetDays || 0,
-      triggerTime: rule.triggerTime?.slice(0, 5) || '09:00',
-      minStayNights: rule.minStayNights,
-      priority: rule.priority || 100,
-    })
-    setShowRuleModal(true)
+  const openNewSchedule = () => {
+    setEditingSchedule(null)
+    resetForm()
+    setShowScheduleModal(true)
   }
 
   if (loading) {
@@ -308,6 +296,8 @@ export default function ScheduledMessagesPage() {
       </div>
     )
   }
+
+  const schedules = getSchedulesWithRules()
 
   return (
     <div className="p-6 space-y-6">
@@ -328,31 +318,13 @@ export default function ScheduledMessagesPage() {
             <RefreshCw className="w-5 h-5" />
           </button>
           
-          {activeTab === 'templates' && (
+          {activeTab === 'schedules' && (
             <button
-              onClick={() => {
-                resetTemplateForm()
-                setEditingTemplate(null)
-                setShowTemplateModal(true)
-              }}
+              onClick={openNewSchedule}
               className="flex items-center gap-2 px-4 py-2 bg-brand-purple text-white rounded-lg hover:bg-brand-purple/90"
             >
               <Plus className="w-4 h-4" />
-              Add Template
-            </button>
-          )}
-          
-          {activeTab === 'rules' && (
-            <button
-              onClick={() => {
-                resetRuleForm()
-                setEditingRule(null)
-                setShowRuleModal(true)
-              }}
-              className="flex items-center gap-2 px-4 py-2 bg-brand-purple text-white rounded-lg hover:bg-brand-purple/90"
-            >
-              <Plus className="w-4 h-4" />
-              Add Rule
+              New Schedule
             </button>
           )}
         </div>
@@ -422,7 +394,7 @@ export default function ScheduledMessagesPage() {
       {/* Tabs */}
       <div className="border-b border-gray-200">
         <nav className="flex gap-8">
-          {['templates', 'rules', 'queue'].map((tab) => (
+          {['schedules', 'queue'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -433,7 +405,7 @@ export default function ScheduledMessagesPage() {
                   : "border-transparent text-brand-mid-gray hover:text-brand-dark"
               )}
             >
-              {tab === 'queue' ? 'Message Queue' : tab}
+              {tab === 'queue' ? 'Message Queue' : 'Scheduled Messages'}
             </button>
           ))}
         </nav>
@@ -441,189 +413,97 @@ export default function ScheduledMessagesPage() {
 
       {/* Tab Content */}
       <AnimatePresence mode="wait">
-        {activeTab === 'templates' && (
+        {activeTab === 'schedules' && (
           <motion.div
-            key="templates"
+            key="schedules"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             className="space-y-4"
           >
-            {templates.length === 0 ? (
-              <div className="bg-white rounded-xl p-8 text-center border border-gray-100">
-                <MessageSquare className="w-12 h-12 text-brand-mid-gray mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-brand-dark mb-2">No Templates Yet</h3>
-                <p className="text-brand-mid-gray mb-4">
-                  Create your first message template to get started
-                </p>
-                <button
-                  onClick={() => setShowTemplateModal(true)}
-                  className="px-4 py-2 bg-brand-purple text-white rounded-lg hover:bg-brand-purple/90"
-                >
-                  Create Template
-                </button>
-              </div>
-            ) : (
-              <div className="grid gap-4">
-                {templates.map((template) => (
-                  <div 
-                    key={template.id}
-                    className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-brand-dark">{template.name}</h3>
-                          <span className={cn(
-                            "px-2 py-0.5 text-xs rounded-full",
-                            template.isActive 
-                              ? "bg-green-100 text-green-700" 
-                              : "bg-gray-100 text-gray-600"
-                          )}>
-                            {template.isActive ? 'Active' : 'Inactive'}
-                          </span>
-                        </div>
-                        <p className="text-sm text-brand-mid-gray mt-1">
-                          Property: {template.propertyName}
-                        </p>
-                        {template.contentSid && (
-                          <p className="text-xs text-brand-mid-gray mt-1 font-mono">
-                            ContentSid: {template.contentSid}
-                          </p>
-                        )}
-                        {template.ruleCount === 0 ? (
-                          <div className="flex items-center gap-2 mt-2">
-                            <AlertCircle className="w-3 h-3 text-amber-500" />
-                            <p className="text-xs text-amber-600">
-                              No rules - this template won't be sent
-                            </p>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setRuleForm({
-                                  ...ruleForm,
-                                  propertyId: template.propertyId,
-                                  templateId: template.id,
-                                  name: `${template.name} - Schedule`,
-                                })
-                                setActiveTab('rules')
-                                setShowRuleModal(true)
-                              }}
-                              className="text-xs text-brand-purple hover:underline font-medium"
-                            >
-                              Create Rule →
-                            </button>
-                          </div>
-                        ) : (
-                          <p className="text-xs text-brand-mid-gray mt-2">
-                            {template.ruleCount} rule(s) using this template
-                          </p>
-                        )}
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => openEditTemplate(template)}
-                          className="p-2 text-brand-mid-gray hover:text-brand-dark rounded-lg hover:bg-gray-100"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteTemplate(template.id)}
-                          className="p-2 text-brand-mid-gray hover:text-red-600 rounded-lg hover:bg-red-50"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </motion.div>
-        )}
-
-        {activeTab === 'rules' && (
-          <motion.div
-            key="rules"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="space-y-4"
-          >
-            {rules.length === 0 ? (
+            {schedules.length === 0 ? (
               <div className="bg-white rounded-xl p-8 text-center border border-gray-100">
                 <Calendar className="w-12 h-12 text-brand-mid-gray mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-brand-dark mb-2">No Schedule Rules Yet</h3>
+                <h3 className="text-lg font-medium text-brand-dark mb-2">No Scheduled Messages Yet</h3>
                 <p className="text-brand-mid-gray mb-4">
-                  Create a rule to define when templates should be sent
+                  Create your first scheduled message to automate guest communications
                 </p>
                 <button
-                  onClick={() => setShowRuleModal(true)}
+                  onClick={openNewSchedule}
                   className="px-4 py-2 bg-brand-purple text-white rounded-lg hover:bg-brand-purple/90"
                 >
-                  Create Rule
+                  Create Schedule
                 </button>
               </div>
             ) : (
               <div className="grid gap-4">
-                {rules.map((rule) => (
+                {schedules.map((schedule) => (
                   <div 
-                    key={rule.id}
+                    key={schedule.id}
                     className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm"
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-brand-dark">{rule.name}</h3>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="font-semibold text-brand-dark">{schedule.templateName || schedule.name}</h3>
                           <span className={cn(
                             "px-2 py-0.5 text-xs rounded-full",
-                            rule.isActive 
+                            schedule.isActive 
                               ? "bg-green-100 text-green-700" 
                               : "bg-gray-100 text-gray-600"
                           )}>
-                            {rule.isActive ? 'Active' : 'Inactive'}
+                            {schedule.isActive ? 'Active' : 'Paused'}
                           </span>
                         </div>
-                        <p className="text-sm text-brand-mid-gray mt-1">
-                          Property: {rule.propertyName} → Template: {rule.templateName}
+                        
+                        <p className="text-sm text-brand-mid-gray">
+                          Property: {schedule.propertyName}
                         </p>
+                        
                         <div className="flex items-center gap-4 mt-2 text-sm">
                           <span className="px-2 py-1 bg-brand-purple/10 text-brand-purple rounded">
-                            {TRIGGER_TYPE_LABELS[rule.triggerType] || rule.triggerType}
+                            {TRIGGER_TYPE_LABELS[schedule.triggerType] || schedule.triggerType}
                           </span>
-                          {rule.triggerOffsetDays !== 0 && (
+                          {schedule.triggerOffsetDays !== 0 && (
                             <span className="text-brand-mid-gray">
-                              {Math.abs(rule.triggerOffsetDays)} day(s)
+                              {Math.abs(schedule.triggerOffsetDays)} day(s)
                             </span>
                           )}
-                          <span className="text-brand-mid-gray">
-                            at {rule.triggerTime?.slice(0, 5) || '09:00'}
-                          </span>
+                          {schedule.triggerType !== 'ON_BOOKING_CREATED' && (
+                            <span className="text-brand-mid-gray">
+                              at {schedule.triggerTime?.slice(0, 5) || '09:00'}
+                            </span>
+                          )}
                         </div>
+                        
+                        {schedule.contentSid && (
+                          <p className="text-xs text-brand-mid-gray mt-2 font-mono">
+                            ContentSid: {schedule.contentSid}
+                          </p>
+                        )}
                       </div>
                       
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => handleToggleRule(rule)}
+                          onClick={() => handleToggleSchedule(schedule)}
                           className={cn(
                             "p-2 rounded-lg",
-                            rule.isActive
+                            schedule.isActive
                               ? "text-green-600 hover:bg-green-50"
                               : "text-gray-400 hover:bg-gray-100"
                           )}
-                          title={rule.isActive ? 'Pause rule' : 'Activate rule'}
+                          title={schedule.isActive ? 'Pause schedule' : 'Activate schedule'}
                         >
-                          {rule.isActive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                          {schedule.isActive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                         </button>
                         <button
-                          onClick={() => openEditRule(rule)}
+                          onClick={() => openEditSchedule(schedule)}
                           className="p-2 text-brand-mid-gray hover:text-brand-dark rounded-lg hover:bg-gray-100"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDeleteRule(rule.id)}
+                          onClick={() => handleDeleteSchedule(schedule)}
                           className="p-2 text-brand-mid-gray hover:text-red-600 rounded-lg hover:bg-red-50"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -668,7 +548,7 @@ export default function ScheduledMessagesPage() {
                 <Clock className="w-12 h-12 text-brand-mid-gray mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-brand-dark mb-2">No Scheduled Messages</h3>
                 <p className="text-brand-mid-gray">
-                  Messages will appear here when bookings trigger schedule rules
+                  Messages will appear here when bookings trigger your schedules
                 </p>
               </div>
             ) : (
@@ -677,7 +557,7 @@ export default function ScheduledMessagesPage() {
                   <thead className="bg-gray-50 border-b border-gray-100">
                     <tr>
                       <th className="text-left p-3 text-sm font-medium text-brand-mid-gray">Guest</th>
-                      <th className="text-left p-3 text-sm font-medium text-brand-mid-gray">Rule</th>
+                      <th className="text-left p-3 text-sm font-medium text-brand-mid-gray">Schedule</th>
                       <th className="text-left p-3 text-sm font-medium text-brand-mid-gray">Scheduled For</th>
                       <th className="text-left p-3 text-sm font-medium text-brand-mid-gray">Status</th>
                       <th className="text-left p-3 text-sm font-medium text-brand-mid-gray">Actions</th>
@@ -694,8 +574,8 @@ export default function ScheduledMessagesPage() {
                         </td>
                         <td className="p-3">
                           <div>
-                            <p className="text-sm text-brand-dark">{msg.ruleName}</p>
-                            <p className="text-xs text-brand-mid-gray">{msg.templateName}</p>
+                            <p className="text-sm text-brand-dark">{msg.templateName}</p>
+                            <p className="text-xs text-brand-mid-gray">{msg.ruleName}</p>
                           </div>
                         </td>
                         <td className="p-3 text-sm text-brand-mid-gray">
@@ -734,15 +614,15 @@ export default function ScheduledMessagesPage() {
         )}
       </AnimatePresence>
 
-      {/* Template Modal */}
+      {/* Combined Schedule Modal (Template + Rule) */}
       <AnimatePresence>
-        {showTemplateModal && (
+        {showScheduleModal && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-            onClick={() => setShowTemplateModal(false)}
+            onClick={() => setShowScheduleModal(false)}
           >
             <motion.div
               initial={{ scale: 0.95 }}
@@ -753,247 +633,169 @@ export default function ScheduledMessagesPage() {
             >
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-brand-dark">
-                  {editingTemplate ? 'Edit Template' : 'New Template'}
+                  {editingSchedule ? 'Edit Schedule' : 'New Scheduled Message'}
                 </h2>
-                <button onClick={() => setShowTemplateModal(false)}>
+                <button onClick={() => setShowScheduleModal(false)}>
                   <X className="w-5 h-5 text-brand-mid-gray" />
                 </button>
               </div>
               
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-brand-dark mb-1">
-                    Property *
-                  </label>
-                  <select
-                    value={templateForm.propertyId}
-                    onChange={(e) => setTemplateForm({ ...templateForm, propertyId: e.target.value })}
-                    className="w-full p-2 border border-gray-200 rounded-lg"
-                    disabled={!!editingTemplate}
-                  >
-                    <option value="">Select Property</option>
-                    {properties.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-brand-dark mb-1">
-                    Template Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={templateForm.name}
-                    onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })}
-                    placeholder="e.g., Welcome Message"
-                    className="w-full p-2 border border-gray-200 rounded-lg"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-brand-dark mb-1">
-                    Twilio ContentSid
-                  </label>
-                  <input
-                    type="text"
-                    value={templateForm.contentSid}
-                    onChange={(e) => setTemplateForm({ ...templateForm, contentSid: e.target.value })}
-                    placeholder="e.g., HX1234abcd..."
-                    className="w-full p-2 border border-gray-200 rounded-lg font-mono text-sm"
-                  />
-                  <p className="text-xs text-brand-mid-gray mt-1">
-                    Get this from your Twilio Content Templates (Meta-approved WhatsApp templates)
-                  </p>
-                </div>
-              </div>
-              
-              <div className="flex items-center justify-end gap-3 mt-6">
-                <button
-                  onClick={() => setShowTemplateModal(false)}
-                  className="px-4 py-2 text-brand-mid-gray hover:text-brand-dark"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={editingTemplate ? handleUpdateTemplate : handleCreateTemplate}
-                  disabled={!templateForm.propertyId || !templateForm.name || !templateForm.contentSid}
-                  className="px-4 py-2 bg-brand-purple text-white rounded-lg hover:bg-brand-purple/90 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {editingTemplate ? 'Update' : 'Create'}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Rule Modal */}
-      <AnimatePresence>
-        {showRuleModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-            onClick={() => setShowRuleModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.95 }}
-              className="bg-white rounded-xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-brand-dark">
-                  {editingRule ? 'Edit Rule' : 'New Schedule Rule'}
-                </h2>
-                <button onClick={() => setShowRuleModal(false)}>
-                  <X className="w-5 h-5 text-brand-mid-gray" />
-                </button>
-              </div>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-brand-dark mb-1">
-                    Property *
-                  </label>
-                  <select
-                    value={ruleForm.propertyId}
-                    onChange={(e) => setRuleForm({ ...ruleForm, propertyId: e.target.value, templateId: '' })}
-                    className="w-full p-2 border border-gray-200 rounded-lg"
-                    disabled={!!editingRule}
-                  >
-                    <option value="">Select Property</option>
-                    {properties.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-brand-dark mb-1">
-                    Template *
-                  </label>
-                  <select
-                    value={ruleForm.templateId}
-                    onChange={(e) => setRuleForm({ ...ruleForm, templateId: e.target.value })}
-                    className="w-full p-2 border border-gray-200 rounded-lg"
-                    disabled={!ruleForm.propertyId}
-                  >
-                    <option value="">Select Template</option>
-                    {templates
-                      .filter((t) => t.propertyId === ruleForm.propertyId)
-                      .map((t) => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-brand-dark mb-1">
-                    Rule Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={ruleForm.name}
-                    onChange={(e) => setRuleForm({ ...ruleForm, name: e.target.value })}
-                    placeholder="e.g., Welcome on Booking"
-                    className="w-full p-2 border border-gray-200 rounded-lg"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-brand-dark mb-1">
-                    Trigger Type *
-                  </label>
-                  <select
-                    value={ruleForm.triggerType}
-                    onChange={(e) => setRuleForm({ ...ruleForm, triggerType: e.target.value })}
-                    className="w-full p-2 border border-gray-200 rounded-lg"
-                  >
-                    {triggerTypes.map((t) => (
-                      <option key={t.value} value={t.value}>
-                        {t.description}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                
-                {ruleForm.triggerType !== 'ON_BOOKING_CREATED' && (
-                  <>
+                {/* Template Section */}
+                <div className="pb-4 border-b border-gray-100">
+                  <h3 className="text-sm font-medium text-brand-mid-gray mb-3 flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4" />
+                    Message Template
+                  </h3>
+                  
+                  <div className="space-y-3">
                     <div>
                       <label className="block text-sm font-medium text-brand-dark mb-1">
-                        Offset (Days)
+                        Property *
                       </label>
-                      <input
-                        type="number"
-                        value={ruleForm.triggerOffsetDays}
-                        onChange={(e) => setRuleForm({ ...ruleForm, triggerOffsetDays: parseInt(e.target.value) || 0 })}
+                      <select
+                        value={scheduleForm.propertyId}
+                        onChange={(e) => setScheduleForm({ ...scheduleForm, propertyId: e.target.value })}
                         className="w-full p-2 border border-gray-200 rounded-lg"
-                      />
-                      <p className="text-xs text-brand-mid-gray mt-1">
-                        Number of days before/after the trigger date
-                      </p>
+                        disabled={!!editingSchedule}
+                      >
+                        <option value="">Select Property</option>
+                        {properties.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
                     </div>
                     
                     <div>
                       <label className="block text-sm font-medium text-brand-dark mb-1">
-                        Time of Day
+                        Template Name *
                       </label>
                       <input
-                        type="time"
-                        value={ruleForm.triggerTime}
-                        onChange={(e) => setRuleForm({ ...ruleForm, triggerTime: e.target.value })}
+                        type="text"
+                        value={scheduleForm.templateName}
+                        onChange={(e) => setScheduleForm({ ...scheduleForm, templateName: e.target.value })}
+                        placeholder="e.g., Welcome Message"
                         className="w-full p-2 border border-gray-200 rounded-lg"
                       />
                     </div>
-                  </>
-                )}
-                
-                <div>
-                  <label className="block text-sm font-medium text-brand-dark mb-1">
-                    Minimum Stay (Nights)
-                  </label>
-                  <input
-                    type="number"
-                    value={ruleForm.minStayNights || ''}
-                    onChange={(e) => setRuleForm({ ...ruleForm, minStayNights: e.target.value ? parseInt(e.target.value) : null })}
-                    placeholder="Optional - only send for stays >= X nights"
-                    className="w-full p-2 border border-gray-200 rounded-lg"
-                  />
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-brand-dark mb-1">
+                        Twilio ContentSid *
+                      </label>
+                      <input
+                        type="text"
+                        value={scheduleForm.contentSid}
+                        onChange={(e) => setScheduleForm({ ...scheduleForm, contentSid: e.target.value })}
+                        placeholder="e.g., HXb0d05c2f5155d181350d93c41235da1d"
+                        className="w-full p-2 border border-gray-200 rounded-lg font-mono text-sm"
+                      />
+                      <p className="text-xs text-brand-mid-gray mt-1">
+                        Get this from your Twilio Content Templates
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                
+
+                {/* Schedule Section */}
                 <div>
-                  <label className="block text-sm font-medium text-brand-dark mb-1">
-                    Priority
-                  </label>
-                  <input
-                    type="number"
-                    value={ruleForm.priority}
-                    onChange={(e) => setRuleForm({ ...ruleForm, priority: parseInt(e.target.value) || 100 })}
-                    className="w-full p-2 border border-gray-200 rounded-lg"
-                  />
-                  <p className="text-xs text-brand-mid-gray mt-1">
-                    Lower number = higher priority (default: 100)
-                  </p>
+                  <h3 className="text-sm font-medium text-brand-mid-gray mb-3 flex items-center gap-2">
+                    <Calendar className="w-4 h-4" />
+                    Schedule Trigger
+                  </h3>
+                  
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-brand-dark mb-1">
+                        When to Send *
+                      </label>
+                      <select
+                        value={scheduleForm.triggerType}
+                        onChange={(e) => setScheduleForm({ ...scheduleForm, triggerType: e.target.value })}
+                        className="w-full p-2 border border-gray-200 rounded-lg"
+                      >
+                        {triggerTypes.length > 0 ? (
+                          triggerTypes.map((t) => (
+                            <option key={t.value} value={t.value}>
+                              {t.description}
+                            </option>
+                          ))
+                        ) : (
+                          Object.entries(TRIGGER_TYPE_LABELS).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+                    
+                    {scheduleForm.triggerType !== 'ON_BOOKING_CREATED' && (
+                      <>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-sm font-medium text-brand-dark mb-1">
+                              Days Offset
+                            </label>
+                            <input
+                              type="number"
+                              value={scheduleForm.triggerOffsetDays}
+                              onChange={(e) => setScheduleForm({ ...scheduleForm, triggerOffsetDays: parseInt(e.target.value) || 0 })}
+                              className="w-full p-2 border border-gray-200 rounded-lg"
+                            />
+                          </div>
+                          
+                          <div>
+                            <label className="block text-sm font-medium text-brand-dark mb-1">
+                              Time of Day
+                            </label>
+                            <input
+                              type="time"
+                              value={scheduleForm.triggerTime}
+                              onChange={(e) => setScheduleForm({ ...scheduleForm, triggerTime: e.target.value })}
+                              className="w-full p-2 border border-gray-200 rounded-lg"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-brand-dark mb-1">
+                        Minimum Stay (Optional)
+                      </label>
+                      <input
+                        type="number"
+                        value={scheduleForm.minStayNights || ''}
+                        onChange={(e) => setScheduleForm({ ...scheduleForm, minStayNights: e.target.value ? parseInt(e.target.value) : null })}
+                        placeholder="Only send for stays of X+ nights"
+                        className="w-full p-2 border border-gray-200 rounded-lg"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
               
-              <div className="flex items-center justify-end gap-3 mt-6">
+              <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
                 <button
-                  onClick={() => setShowRuleModal(false)}
+                  onClick={() => setShowScheduleModal(false)}
                   className="px-4 py-2 text-brand-mid-gray hover:text-brand-dark"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={editingRule ? handleUpdateRule : handleCreateRule}
-                  disabled={!ruleForm.propertyId || !ruleForm.templateId || !ruleForm.name}
-                  className="px-4 py-2 bg-brand-purple text-white rounded-lg hover:bg-brand-purple/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={editingSchedule ? handleUpdateSchedule : handleCreateSchedule}
+                  disabled={!scheduleForm.propertyId || !scheduleForm.templateName || !scheduleForm.contentSid || saving}
+                  className="px-4 py-2 bg-brand-purple text-white rounded-lg hover:bg-brand-purple/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {editingRule ? 'Update' : 'Create'}
+                  {saving && (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
+                    />
+                  )}
+                  {editingSchedule ? 'Update' : 'Create Schedule'}
                 </button>
               </div>
             </motion.div>
@@ -1003,4 +805,3 @@ export default function ScheduledMessagesPage() {
     </div>
   )
 }
-
