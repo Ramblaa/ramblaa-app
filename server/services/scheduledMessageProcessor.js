@@ -6,7 +6,7 @@
  */
 
 import { getDbWithPrepare as getDb } from '../db/index.js';
-import { sendTemplateMessage, sendWhatsAppMessage } from './twilio.js';
+import { sendTemplateMessage } from './twilio.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const MAX_RETRIES = 3;
@@ -26,7 +26,7 @@ export async function processPendingScheduledMessages() {
     // Get messages due to be sent
     const pending = await db.prepare(`
       SELECT sm.*, 
-             mt.content_sid, mt.fallback_body, mt.name as template_name,
+             mt.content_sid, mt.name as template_name,
              b.guest_name, b.guest_phone,
              p.name as property_name, p.host_phone
       FROM scheduled_messages sm
@@ -52,40 +52,24 @@ export async function processPendingScheduledMessages() {
       results.processed++;
       
       try {
-        const variables = msg.variables_json ? JSON.parse(msg.variables_json) : {};
-        let sendResult;
-        
-        // Use Twilio template (ContentSid) if available, otherwise fallback to regular message
-        if (msg.content_sid) {
-          sendResult = await sendTemplateMessage({
-            to: msg.to_number,
-            contentSid: msg.content_sid,
-            contentVariables: variables,
-            metadata: {
-              propertyId: msg.property_id,
-              bookingId: msg.booking_id,
-              scheduleType: 'scheduled',
-              templateName: msg.template_name,
-            },
-          });
-        } else if (msg.fallback_body) {
-          // Use fallback body with variable substitution
-          const messageBody = substituteVariables(msg.fallback_body, variables);
-          
-          sendResult = await sendWhatsAppMessage({
-            to: msg.to_number,
-            body: messageBody,
-            recipientType: 'Guest',
-            metadata: {
-              propertyId: msg.property_id,
-              bookingId: msg.booking_id,
-              scheduleType: 'scheduled',
-              templateName: msg.template_name,
-            },
-          });
-        } else {
-          throw new Error('No content_sid or fallback_body configured for template');
+        if (!msg.content_sid) {
+          throw new Error('No content_sid configured for template - Twilio ContentSid is required');
         }
+
+        const variables = msg.variables_json ? JSON.parse(msg.variables_json) : {};
+        
+        // Send via Twilio template (ContentSid)
+        const sendResult = await sendTemplateMessage({
+          to: msg.to_number,
+          contentSid: msg.content_sid,
+          contentVariables: variables,
+          metadata: {
+            propertyId: msg.property_id,
+            bookingId: msg.booking_id,
+            scheduleType: 'scheduled',
+            templateName: msg.template_name,
+          },
+        });
 
         if (sendResult.success) {
           // Mark as sent
@@ -132,23 +116,6 @@ export async function processPendingScheduledMessages() {
     console.error('[ScheduledProcessor] Error:', error.message);
     throw error;
   }
-}
-
-/**
- * Substitute template variables in a message body
- * Supports both {{variable}} and numbered {1} formats
- */
-function substituteVariables(template, variables) {
-  let result = template;
-  
-  for (const [key, value] of Object.entries(variables)) {
-    // Replace {{key}} format
-    result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'gi'), value);
-    // Replace {key} format (Twilio numbered)
-    result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
-  }
-  
-  return result;
 }
 
 /**

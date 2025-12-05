@@ -47,7 +47,6 @@ router.get('/templates', async (req, res) => {
       propertyName: t.property_name,
       name: t.name,
       contentSid: t.content_sid,
-      fallbackBody: t.fallback_body,
       variablesSchema: t.variables_schema ? JSON.parse(t.variables_schema) : [],
       isActive: t.is_active === 1,
       ruleCount: t.rule_count,
@@ -91,7 +90,6 @@ router.get('/templates/:id', async (req, res) => {
       propertyName: template.property_name,
       name: template.name,
       contentSid: template.content_sid,
-      fallbackBody: template.fallback_body,
       variablesSchema: template.variables_schema ? JSON.parse(template.variables_schema) : [],
       isActive: template.is_active === 1,
       createdAt: template.created_at,
@@ -118,29 +116,28 @@ router.get('/templates/:id', async (req, res) => {
 router.post('/templates', async (req, res) => {
   try {
     const db = getDb();
-    const { propertyId, name, contentSid, fallbackBody, variablesSchema } = req.body;
+    const { propertyId, name, contentSid, variablesSchema } = req.body;
 
     if (!propertyId || !name) {
       return res.status(400).json({ error: 'Missing required fields: propertyId, name' });
     }
 
-    if (!contentSid && !fallbackBody) {
-      return res.status(400).json({ error: 'Either contentSid or fallbackBody is required' });
+    if (!contentSid) {
+      return res.status(400).json({ error: 'contentSid is required (Twilio template ID)' });
     }
 
     const id = uuidv4();
 
     await db.prepare(`
       INSERT INTO message_templates (
-        id, property_id, name, content_sid, fallback_body, variables_schema,
+        id, property_id, name, content_sid, variables_schema,
         is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `).run(
       id,
       propertyId,
       name,
-      contentSid || null,
-      fallbackBody || null,
+      contentSid,
       variablesSchema ? JSON.stringify(variablesSchema) : null
     );
 
@@ -150,7 +147,6 @@ router.post('/templates', async (req, res) => {
       propertyId: template.property_id,
       name: template.name,
       contentSid: template.content_sid,
-      fallbackBody: template.fallback_body,
       variablesSchema: template.variables_schema ? JSON.parse(template.variables_schema) : [],
       isActive: template.is_active === 1,
     });
@@ -168,7 +164,7 @@ router.put('/templates/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
-    const { name, contentSid, fallbackBody, variablesSchema, isActive } = req.body;
+    const { name, contentSid, variablesSchema, isActive } = req.body;
 
     const existing = await db.prepare('SELECT * FROM message_templates WHERE id = ?').get(id);
     if (!existing) {
@@ -178,16 +174,14 @@ router.put('/templates/:id', async (req, res) => {
     await db.prepare(`
       UPDATE message_templates SET
         name = COALESCE(?, name),
-        content_sid = ?,
-        fallback_body = ?,
+        content_sid = COALESCE(?, content_sid),
         variables_schema = ?,
         is_active = COALESCE(?, is_active),
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
       name || null,
-      contentSid !== undefined ? contentSid : existing.content_sid,
-      fallbackBody !== undefined ? fallbackBody : existing.fallback_body,
+      contentSid || null,
       variablesSchema ? JSON.stringify(variablesSchema) : existing.variables_schema,
       isActive !== undefined ? (isActive ? 1 : 0) : null,
       id
@@ -199,7 +193,6 @@ router.put('/templates/:id', async (req, res) => {
       propertyId: updated.property_id,
       name: updated.name,
       contentSid: updated.content_sid,
-      fallbackBody: updated.fallback_body,
       variablesSchema: updated.variables_schema ? JSON.parse(updated.variables_schema) : [],
       isActive: updated.is_active === 1,
     });

@@ -57,7 +57,6 @@ export default function ScheduledMessagesPage() {
     propertyId: '',
     name: '',
     contentSid: '',
-    fallbackBody: '',
     variablesSchema: [],
   })
   
@@ -80,23 +79,29 @@ export default function ScheduledMessagesPage() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [templatesRes, rulesRes, messagesRes, propsRes, statsRes, triggersRes] = await Promise.all([
+      // Fetch properties first - this is critical for the dropdowns
+      const propsRes = await apiService.request('/api/properties')
+      setProperties(propsRes || [])
+      console.log('[ScheduledMessages] Properties loaded:', propsRes?.length || 0)
+      
+      // Fetch other data in parallel, with individual error handling
+      const results = await Promise.allSettled([
         apiService.request('/api/scheduled/templates'),
         apiService.request('/api/scheduled/rules'),
         apiService.request('/api/scheduled/messages?limit=50'),
-        apiService.request('/api/properties'),
         apiService.request('/api/scheduled/stats'),
         apiService.request('/api/scheduled/trigger-types'),
       ])
       
-      setTemplates(templatesRes)
-      setRules(rulesRes)
-      setScheduledMessages(messagesRes)
-      setProperties(propsRes)
-      setStats(statsRes)
-      setTriggerTypes(triggersRes)
+      if (results[0].status === 'fulfilled') setTemplates(results[0].value || [])
+      if (results[1].status === 'fulfilled') setRules(results[1].value || [])
+      if (results[2].status === 'fulfilled') setScheduledMessages(results[2].value || [])
+      if (results[3].status === 'fulfilled') setStats(results[3].value)
+      if (results[4].status === 'fulfilled') setTriggerTypes(results[4].value || [])
+      
       setError(null)
     } catch (err) {
+      console.error('[ScheduledMessages] Fetch error:', err)
       setError(err.message)
     } finally {
       setLoading(false)
@@ -236,7 +241,6 @@ export default function ScheduledMessagesPage() {
       propertyId: '',
       name: '',
       contentSid: '',
-      fallbackBody: '',
       variablesSchema: [],
     })
   }
@@ -260,7 +264,6 @@ export default function ScheduledMessagesPage() {
       propertyId: template.propertyId,
       name: template.name,
       contentSid: template.contentSid || '',
-      fallbackBody: template.fallbackBody || '',
       variablesSchema: template.variablesSchema || [],
     })
     setShowTemplateModal(true)
@@ -473,11 +476,6 @@ export default function ScheduledMessagesPage() {
                         {template.contentSid && (
                           <p className="text-xs text-brand-mid-gray mt-1 font-mono">
                             ContentSid: {template.contentSid}
-                          </p>
-                        )}
-                        {template.fallbackBody && (
-                          <p className="text-sm text-brand-mid-gray mt-2 italic">
-                            "{template.fallbackBody.slice(0, 100)}..."
                           </p>
                         )}
                         <p className="text-xs text-brand-mid-gray mt-2">
@@ -767,23 +765,7 @@ export default function ScheduledMessagesPage() {
                     className="w-full p-2 border border-gray-200 rounded-lg font-mono text-sm"
                   />
                   <p className="text-xs text-brand-mid-gray mt-1">
-                    Use this for Meta-approved WhatsApp templates
-                  </p>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-brand-dark mb-1">
-                    Fallback Message Body
-                  </label>
-                  <textarea
-                    value={templateForm.fallbackBody}
-                    onChange={(e) => setTemplateForm({ ...templateForm, fallbackBody: e.target.value })}
-                    placeholder="Hi {{guest_name}}, welcome to {{property_name}}!"
-                    rows={4}
-                    className="w-full p-2 border border-gray-200 rounded-lg"
-                  />
-                  <p className="text-xs text-brand-mid-gray mt-1">
-                    Variables: {'{{guest_name}}'}, {'{{check_in_date}}'}, {'{{check_out_date}}'}, {'{{property_name}}'}
+                    Get this from your Twilio Content Templates (Meta-approved WhatsApp templates)
                   </p>
                 </div>
               </div>
@@ -797,7 +779,7 @@ export default function ScheduledMessagesPage() {
                 </button>
                 <button
                   onClick={editingTemplate ? handleUpdateTemplate : handleCreateTemplate}
-                  disabled={!templateForm.propertyId || !templateForm.name || (!templateForm.contentSid && !templateForm.fallbackBody)}
+                  disabled={!templateForm.propertyId || !templateForm.name || !templateForm.contentSid}
                   className="px-4 py-2 bg-brand-purple text-white rounded-lg hover:bg-brand-purple/90 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {editingTemplate ? 'Update' : 'Create'}

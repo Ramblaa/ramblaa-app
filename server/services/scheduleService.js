@@ -34,7 +34,7 @@ export async function onBookingCreated(booking) {
   try {
     // Get all active rules for this property
     const rules = await db.prepare(`
-      SELECT r.*, t.content_sid, t.fallback_body, t.variables_schema, t.name as template_name
+      SELECT r.*, t.content_sid, t.variables_schema, t.name as template_name
       FROM message_schedule_rules r
       JOIN message_templates t ON r.template_id = t.id
       WHERE r.property_id = ? AND r.is_active = 1 AND t.is_active = 1
