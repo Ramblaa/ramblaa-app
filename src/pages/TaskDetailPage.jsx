@@ -164,6 +164,9 @@ export default function TaskDetailPage() {
     })
     
     // Return single unified conversation
+    // Only show staffName if there's an actual assignee (not 'Unassigned')
+    const hasStaff = taskData.assignee && taskData.assignee !== 'Unassigned'
+    
     return [{
       id: 'unified',
       personName: 'Task Communications',
@@ -172,7 +175,7 @@ export default function TaskDetailPage() {
       phone: taskData.guestPhone,
       staffPhone: taskData.assigneePhone,
       guestName: taskData.guestName || 'Guest',
-      staffName: taskData.assignee || 'Staff',
+      staffName: hasStaff ? taskData.assignee : null,
       lastActivity: formatLastActivity(taskData.updatedAt),
       autoResponseEnabled: true,
       messages: allMessages.length > 0 ? allMessages : [{
