@@ -121,6 +121,34 @@ router.get('/ai-logs', async (req, res) => {
 });
 
 /**
+ * POST /api/tasks/clear-old-logs
+ * Clear old/stale ai_logs to prevent old test data from creating tasks
+ */
+router.post('/clear-old-logs', async (req, res) => {
+  try {
+    const db = getDb();
+    
+    // Mark all pending ai_logs as processed to clear the backlog
+    const result = await db.prepare(`
+      UPDATE ai_logs 
+      SET task_created = 1 
+      WHERE task_created = 0
+    `).run();
+    
+    console.log(`[Tasks] Cleared ${result.changes || 0} pending ai_logs`);
+    
+    res.json({
+      success: true,
+      clearedCount: result.changes || 0,
+      message: 'All pending ai_logs marked as processed',
+    });
+  } catch (error) {
+    console.error('[Tasks] Clear logs error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * POST /api/tasks/force-create
  * Force task creation from pending AI logs
  */
