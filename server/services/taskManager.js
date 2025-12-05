@@ -56,20 +56,17 @@ export async function createTasksFromAiLogs() {
     console.log(`[TaskManager]   to_number: ${log.to_number}`);
     console.log(`[TaskManager] ========================================`);
     
-    if (!log.task_bucket) {
-      console.log(`[TaskManager] ✗ Skipping - no task bucket`);
-      continue;
-    }
-    
-    // Skip only if bucket is empty (AI didn't identify any task)
-    // "Other" bucket is VALID - these are requests that don't match predefined categories
-    if (!log.task_bucket || log.task_bucket.trim() === '') {
-      console.log(`[TaskManager] ✗ Skipping - no task bucket identified`);
-      await db.prepare(`UPDATE ai_logs SET task_created = 1 WHERE id = ?`).run(log.id);
-      continue;
-    }
-    
-    console.log(`[TaskManager] Creating task for bucket: "${log.task_bucket}" (Other buckets are valid!)`)
+    // Wrap in try-catch to ALWAYS mark log as processed, even on error
+    try {
+      // Skip only if bucket is empty (AI didn't identify any task)
+      // "Other" bucket is VALID - these are requests that don't match predefined categories
+      if (!log.task_bucket || log.task_bucket.trim() === '') {
+        console.log(`[TaskManager] ✗ Skipping - no task bucket identified`);
+        await db.prepare(`UPDATE ai_logs SET task_created = 1 WHERE id = ?`).run(log.id);
+        continue;
+      }
+      
+      console.log(`[TaskManager] Creating task for bucket: "${log.task_bucket}" (Other buckets are valid!)`)
     
     // Try to find property_id if missing
     let propertyId = log.property_id;
@@ -221,6 +218,18 @@ export async function createTasksFromAiLogs() {
 
     console.log(`[TaskManager] Task ${taskId} created, assigned to: ${task.staff_name || 'unassigned'}`);
     created.push(task);
+    
+    } catch (taskError) {
+      // CRITICAL: Always mark the log as processed, even on error
+      // This prevents the same log from being reprocessed and causing duplicate/wrong tasks
+      console.error(`[TaskManager] ✗ Error creating task for log ${log.id}:`, taskError.message);
+      try {
+        await db.prepare(`UPDATE ai_logs SET task_created = 1 WHERE id = ?`).run(log.id);
+        console.log(`[TaskManager] Marked failed log ${log.id} as processed to prevent reprocessing`);
+      } catch (markError) {
+        console.error(`[TaskManager] ✗ Failed to mark log as processed:`, markError.message);
+      }
+    }
   }
 
   return created;

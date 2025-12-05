@@ -221,6 +221,7 @@ router.post('/migrate-dates', async (req, res) => {
 /**
  * POST /api/tasks/cleanup
  * Clean up old broken tasks from previous buggy runs
+ * NOTE: This keeps ai_logs marked as task_created=1 to prevent reprocessing!
  */
 router.post('/cleanup', async (req, res) => {
   try {
@@ -230,32 +231,37 @@ router.post('/cleanup', async (req, res) => {
     const toDelete = await db.prepare(`
       SELECT id, action_title, task_bucket, status, created_at
       FROM tasks
-      WHERE action_title ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%'])
-         OR task_bucket ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%', 'Other'])
+      WHERE LOWER(action_title) LIKE '%wifi%'
+         OR LOWER(action_title) LIKE '%wi-fi%'
+         OR LOWER(action_title) LIKE '%direction%'
+         OR LOWER(action_title) LIKE '%taxi%'
+         OR LOWER(task_bucket) LIKE '%wifi%'
+         OR LOWER(task_bucket) LIKE '%wi-fi%'
+         OR LOWER(task_bucket) LIKE '%direction%'
+         OR LOWER(task_bucket) LIKE '%taxi%'
     `).all();
     
     console.log(`[Tasks] Found ${toDelete.length} broken tasks to clean up`);
     
     // Delete the broken tasks
-    await db.prepare(`
-      DELETE FROM tasks
-      WHERE action_title ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%'])
-         OR task_bucket ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%', 'Other'])
-    `).run();
+    if (toDelete.length > 0) {
+      const taskIds = toDelete.map(t => t.id);
+      for (const taskId of taskIds) {
+        await db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
+      }
+    }
     
-    // Also clean up related ai_logs entries
-    await db.prepare(`
-      UPDATE ai_logs 
-      SET task_created = 0, task_uuid = NULL
-      WHERE task_bucket ILIKE ANY(ARRAY['%Wi-Fi%', '%WiFi%', '%wifi%', '%direction%', '%taxi%', 'Other'])
-    `).run();
+    // IMPORTANT: Do NOT reset ai_logs to task_created=0!
+    // That would cause them to be reprocessed and recreate the broken tasks.
+    // The ai_logs stay marked as task_created=1 so they're not processed again.
     
-    console.log(`[Tasks] Cleaned up ${toDelete.length} broken tasks`);
+    console.log(`[Tasks] Cleaned up ${toDelete.length} broken tasks (ai_logs remain marked as processed)`);
     
     res.json({
       success: true,
       deletedCount: toDelete.length,
       deletedTasks: toDelete,
+      note: 'ai_logs remain marked as processed to prevent reprocessing',
     });
   } catch (error) {
     console.error('[Tasks] Cleanup error:', error);
