@@ -67,7 +67,7 @@ router.get('/', async (req, res) => {
       const createdAt = task.created_at ? new Date(task.created_at).toISOString() : null;
       return {
         id: task.id,
-        title: task.task_request_title || task.action_title || task.task_bucket,
+        title: task.task_bucket || task.task_request_title,  // Show category name (e.g., "Fresh Towels")
         type: getTaskType(task.task_bucket),
         property: task.property_name || 'Unknown',
         propertyId: task.property_id,
@@ -313,7 +313,7 @@ router.get('/:id', async (req, res) => {
 
     res.json({
       id: task.id,
-      title: task.task_request_title || task.action_title,
+      title: task.task_bucket || task.task_request_title,  // Show category name (e.g., "Fresh Towels")
       type: getTaskType(task.task_bucket),
       bucket: task.task_bucket,
       property: task.property_name || 'Unknown',
