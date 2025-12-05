@@ -61,8 +61,6 @@ export default function ScheduledMessagesPage() {
     triggerType: 'ON_BOOKING_CREATED',
     triggerOffsetDays: 0,
     triggerTime: '09:00',
-    minStayNights: null,
-    priority: 100,
   })
 
   // Fetch data
@@ -138,8 +136,6 @@ export default function ScheduledMessagesPage() {
           triggerType: scheduleForm.triggerType,
           triggerOffsetDays: scheduleForm.triggerOffsetDays,
           triggerTime: scheduleForm.triggerTime,
-          minStayNights: scheduleForm.minStayNights,
-          priority: scheduleForm.priority,
         }),
       })
       
@@ -177,8 +173,6 @@ export default function ScheduledMessagesPage() {
           triggerType: scheduleForm.triggerType,
           triggerOffsetDays: scheduleForm.triggerOffsetDays,
           triggerTime: scheduleForm.triggerTime,
-          minStayNights: scheduleForm.minStayNights,
-          priority: scheduleForm.priority,
         }),
       })
       
@@ -258,8 +252,6 @@ export default function ScheduledMessagesPage() {
       triggerType: 'ON_BOOKING_CREATED',
       triggerOffsetDays: 0,
       triggerTime: '09:00',
-      minStayNights: null,
-      priority: 100,
     })
   }
 
@@ -273,8 +265,6 @@ export default function ScheduledMessagesPage() {
       triggerType: schedule.triggerType,
       triggerOffsetDays: schedule.triggerOffsetDays || 0,
       triggerTime: schedule.triggerTime?.slice(0, 5) || '09:00',
-      minStayNights: schedule.minStayNights,
-      priority: schedule.priority || 100,
     })
     setShowScheduleModal(true)
   }
@@ -757,21 +747,8 @@ export default function ScheduledMessagesPage() {
                             />
                           </div>
                         </div>
-                      </>
+                        </>
                     )}
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-brand-dark mb-1">
-                        Minimum Stay (Optional)
-                      </label>
-                      <input
-                        type="number"
-                        value={scheduleForm.minStayNights || ''}
-                        onChange={(e) => setScheduleForm({ ...scheduleForm, minStayNights: e.target.value ? parseInt(e.target.value) : null })}
-                        placeholder="Only send for stays of X+ nights"
-                        className="w-full p-2 border border-gray-200 rounded-lg"
-                      />
-                    </div>
                   </div>
                 </div>
               </div>
