@@ -64,12 +64,14 @@ router.get('/', async (req, res) => {
 
     // Format response
     const formatted = tasks.map(task => {
-      // Handle date - PostgreSQL returns Date objects, not strings
+      // Handle dates - PostgreSQL returns Date objects, not strings
       const createdAt = task.created_at ? new Date(task.created_at).toISOString() : null;
+      const scheduledFor = task.scheduled_for ? new Date(task.scheduled_for).toISOString() : null;
+      
       return {
         id: task.id,
-        title: task.task_request_title || task.task_bucket || 'Task',  // Main title: "Check-in inquiry"
-        subtitle: task.task_bucket || '',  // Subtitle: "Other"
+        title: task.task_request_title || task.task_bucket || 'Task',
+        subtitle: task.task_bucket || '',
         type: getTaskType(task.task_bucket),
         property: task.property_name || 'Unknown',
         propertyId: task.property_id,
@@ -77,12 +79,15 @@ router.get('/', async (req, res) => {
         assigneePhone: task.staff_phone,
         parentTaskId: task.parent_task_id,
         isFromRecurring: !!task.parent_task_id,
-        dueDate: createdAt?.split('T')[0],
-        dueTime: createdAt?.split('T')[1]?.slice(0, 5),
+        createdDate: createdAt?.split('T')[0],
+        createdTime: createdAt?.split('T')[1]?.slice(0, 5),
+        scheduledFor,
+        scheduledForDate: scheduledFor?.split('T')[0],
+        scheduledForTime: scheduledFor?.split('T')[1]?.slice(0, 5),
         status: formatStatus(task.status),
         priority: getPriority(task),
         description: task.guest_message || '',
-        threadCount: 1, // Would need to count from messages
+        threadCount: 1,
         actionHolder: task.action_holder,
         guestPhone: task.phone,
         guestName: task.guest_name,
@@ -679,6 +684,7 @@ router.post('/', async (req, res) => {
       staffId,
       staffName,
       staffPhone,
+      scheduledFor,  // When task is planned to happen (ISO timestamp)
     } = req.body;
 
     if (!propertyId || !title) {
@@ -691,8 +697,8 @@ router.post('/', async (req, res) => {
       INSERT INTO tasks (
         id, property_id, booking_id, phone, task_request_title,
         guest_message, task_bucket, staff_id, staff_name, staff_phone,
-        action_holder, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Staff', 'Waiting on Staff', CURRENT_TIMESTAMP)
+        scheduled_for, action_holder, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Staff', 'Waiting on Staff', CURRENT_TIMESTAMP)
     `).run(
       id,
       propertyId,
@@ -703,7 +709,8 @@ router.post('/', async (req, res) => {
       taskBucket || 'Other',
       staffId || null,
       staffName || null,
-      staffPhone || null
+      staffPhone || null,
+      scheduledFor || null
     );
 
     const task = await db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);

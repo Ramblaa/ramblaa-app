@@ -60,6 +60,8 @@ export default function TasksPage() {
     staffPhone: '',
     bookingId: '',
     phone: '',
+    scheduledForDate: '',  // When task is planned to happen
+    scheduledForTime: '',
     repeatType: 'NONE', // NONE | DAILY | WEEKLY | MONTHLY | INTERVAL
     intervalDays: 90,
     startDate: today,
@@ -116,6 +118,13 @@ export default function TasksPage() {
     }
     setSaving(true)
     try {
+      // Build scheduledFor timestamp if date is provided
+      let scheduledFor = undefined
+      if (newTask.scheduledForDate) {
+        const time = newTask.scheduledForTime || '09:00'
+        scheduledFor = `${newTask.scheduledForDate}T${time}:00`
+      }
+      
       if (newTask.repeatType === 'NONE') {
         await tasksApi.createTask({
           propertyId: newTask.propertyId,
@@ -127,6 +136,7 @@ export default function TasksPage() {
           staffId: newTask.staffId,
           staffName: newTask.staffName || undefined,
           staffPhone: newTask.staffPhone || undefined,
+          scheduledFor,
         })
       } else {
         await tasksApi.createRecurringTask({
@@ -149,7 +159,7 @@ export default function TasksPage() {
         })
       }
       setShowAddModal(false)
-      setNewTask(prev => ({ ...prev, title: '', description: '', taskBucket: '', repeatType: 'NONE' }))
+      setNewTask(prev => ({ ...prev, title: '', description: '', taskBucket: '', scheduledForDate: '', scheduledForTime: '', repeatType: 'NONE' }))
       loadData()
     } catch (err) {
       console.error('Add task failed', err)
@@ -429,48 +439,38 @@ export default function TasksPage() {
                 )}
                 onClick={() => navigate(`/tasks/${task.id}`)}
               >
-                <div className="p-6">
+                <div className="p-4 sm:p-6">
                   <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-                    <div className="flex-1 space-y-3">
-                      <div className="flex items-start gap-3">
-                        <div className="w-8 h-8 bg-brand-100 rounded-full flex items-center justify-center">
+                    <div className="flex-1 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 bg-brand-100 rounded-full flex items-center justify-center flex-shrink-0">
                           <IconComponent className="h-4 w-4 text-brand-600" />
                         </div>
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-ink-900">{task.title}</h3>
-                          {task.subtitle && (
-                            <p className="text-xs text-ink-500">{task.subtitle}</p>
-                          )}
-                          <p className="text-sm text-ink-500 mt-1">{task.description}</p>
-                        </div>
+                        <h3 className="font-semibold text-ink-900">{task.title}</h3>
                       </div>
-                      
-                      <div className="flex flex-wrap gap-4 text-sm text-ink-500">
-                        <div className="flex items-center gap-1">
+                      {task.description && (
+                        <p className="text-sm text-ink-500">{task.description}</p>
+                      )}
+                      <div className="flex flex-wrap gap-3 text-sm text-ink-500">
+                        <span className="flex items-center gap-1">
                           <MapPin className="h-4 w-4" />
-                          <span>{task.property}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
+                          {task.property}
+                        </span>
+                        <span className="flex items-center gap-1">
                           <User className="h-4 w-4" />
-                          <span>{task.assignee}</span>
-                        </div>
-                        {task.dueDate && (
-                          <div className="flex items-center gap-1">
+                          {task.assignee}
+                        </span>
+                        {task.scheduledForDate && (
+                          <span className="flex items-center gap-1 text-brand-600 font-medium">
                             <Calendar className="h-4 w-4" />
-                            <span>{task.dueDate} {task.dueTime ? `at ${task.dueTime}` : ''}</span>
-                          </div>
-                        )}
-                        {task.threadCount > 0 && (
-                          <div className="flex items-center gap-1">
-                            <MessageCircle className="h-4 w-4" />
-                            <span>{task.threadCount} thread{task.threadCount !== 1 ? 's' : ''}</span>
-                          </div>
+                            Scheduled: {task.scheduledForDate}{task.scheduledForTime ? ` at ${task.scheduledForTime}` : ''}
+                          </span>
                         )}
                       </div>
                     </div>
                     
                     <div className="flex flex-col sm:items-end gap-2">
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <Badge variant={statusColors[task.status] || 'secondary'}>
                           {task.status?.replace('-', ' ')}
                         </Badge>
@@ -478,31 +478,35 @@ export default function TasksPage() {
                           {task.priority} priority
                         </Badge>
                         {task.isFromRecurring && (
-                          <Badge variant="info" className="flex items-center gap-1">
+                          <Badge variant="outline" className="flex items-center gap-1">
                             <Repeat className="h-3 w-3" />
                             From Template
                           </Badge>
                         )}
                       </div>
-                      
-                      <div className="flex gap-2">
+                      <p className="text-xs text-ink-400">
+                        Created: {task.createdDate || 'N/A'}
+                      </p>
+                      <div className="flex gap-2 mt-1">
                         {task.status !== 'completed' && (
                           <Button 
-                            size="icon" 
+                            size="sm" 
                             variant="outline"
                             onClick={(e) => handleMarkComplete(e, task.id)}
-                            className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                            className="h-8 text-green-600 hover:text-green-700 hover:bg-green-50"
                           >
-                            <Check className="h-4 w-4" />
+                            <Check className="h-3 w-3 mr-1" />
+                            Complete
                           </Button>
                         )}
                         <Button 
-                          size="icon" 
+                          size="sm" 
                           variant="outline"
                           onClick={(e) => handleDeleteTask(e, task.id)}
-                          className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          className="h-8 text-red-600 hover:text-red-700 hover:bg-red-50"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3 w-3 mr-1" />
+                          Delete
                         </Button>
                       </div>
                     </div>
@@ -752,6 +756,32 @@ export default function TasksPage() {
                     onChange={(e) => setNewTask(prev => ({ ...prev, phone: e.target.value }))}
                     placeholder="+1..."
                   />
+                </div>
+              </div>
+
+              {/* Scheduled For Section */}
+              <div className="border rounded-lg p-4 space-y-3">
+                <div>
+                  <p className="font-semibold text-ink-900">Scheduled For (optional)</p>
+                  <p className="text-sm text-ink-500">When should this task be completed?</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-ink-800">Date</label>
+                    <Input
+                      type="date"
+                      value={newTask.scheduledForDate}
+                      onChange={(e) => setNewTask(prev => ({ ...prev, scheduledForDate: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-ink-800">Time</label>
+                    <Input
+                      type="time"
+                      value={newTask.scheduledForTime}
+                      onChange={(e) => setNewTask(prev => ({ ...prev, scheduledForTime: e.target.value }))}
+                    />
+                  </div>
                 </div>
               </div>
 

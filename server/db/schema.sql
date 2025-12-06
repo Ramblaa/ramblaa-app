@@ -238,7 +238,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   message_chain_ids TEXT,
   ongoing_conversation TEXT,
   priority TEXT DEFAULT 'medium',  -- low, medium, high, urgent
-  scheduled_at TIMESTAMP,
+  scheduled_for TIMESTAMP,          -- when task is planned to happen
+  scheduled_at TIMESTAMP,           -- when task was marked as scheduled (system timestamp)
   completed_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
