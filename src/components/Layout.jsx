@@ -64,7 +64,7 @@ export default function Layout({ children }) {
           
           <div className="flex-1 h-0 pt-5 pb-4 overflow-y-auto">
             <div className="flex h-16 items-center px-6 border-b border-ink-700">
-              <h1 className="text-xl font-bold text-brand-400">Ramble</h1>
+              <h1 className="text-xl font-semibold text-white tracking-tight">Ramble</h1>
             </div>
             <nav className="mt-5 px-2 space-y-1">
               {navigation.map((item) => {
@@ -129,7 +129,7 @@ export default function Layout({ children }) {
           <div className="flex flex-col h-0 flex-1 bg-ink-900">
             {/* Logo */}
             <div className="flex h-16 items-center px-6 border-b border-ink-700">
-              <h1 className="text-xl font-bold text-brand-400">Ramble</h1>
+              <h1 className="text-xl font-semibold text-white tracking-tight">Ramble</h1>
             </div>
             
             {/* Navigation */}
@@ -206,7 +206,7 @@ export default function Layout({ children }) {
             <div className="flex-1 px-4 flex justify-between">
               <div className="flex-1 flex">
                 <div className="w-full flex md:ml-0">
-                  <div className="flex items-center text-lg font-semibold text-brand-600">
+                  <div className="flex items-center text-xl font-semibold text-black tracking-tight">
                     Ramble
                   </div>
                 </div>
