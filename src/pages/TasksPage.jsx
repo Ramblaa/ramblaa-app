@@ -431,15 +431,15 @@ export default function TasksPage() {
 
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0">
               <div>
                 <h2 className="text-xl font-semibold text-ink-900">Add Task</h2>
                 <p className="text-sm text-ink-500">One-off or recurring task</p>
               </div>
               <Button variant="ghost" onClick={() => setShowAddModal(false)}>Close</Button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-ink-800">Property *</label>
