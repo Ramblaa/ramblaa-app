@@ -475,7 +475,9 @@ export default function TasksPage() {
                       ))}
                     </select>
                     {!propertyDetails?.taskDefinitions?.length && (
-                      <p className="text-xs text-amber-600">No task definitions. Add in Resources.</p>
+                      <p className="text-xs text-amber-600">
+                        No task definitions. <a className="underline" href="/resources" target="_blank" rel="noreferrer">Open Resources</a> to add one.
+                      </p>
                     )}
                   </div>
 
@@ -531,7 +533,9 @@ export default function TasksPage() {
                     ))}
                   </select>
                   {!propertyDetails?.staff?.length && (
-                    <p className="text-xs text-amber-600">No staff for this property. Add staff first.</p>
+                    <p className="text-xs text-amber-600">
+                      No staff for this property. <a className="underline" href="/resources" target="_blank" rel="noreferrer">Open Resources</a> to add staff.
+                    </p>
                   )}
                 </div>
                 <div className="space-y-2">
