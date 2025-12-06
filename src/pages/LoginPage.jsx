@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
@@ -244,8 +244,15 @@ export default function LoginPage() {
                     Must be at least 8 characters with a letter, number, and special character
                   </p>
                 )}
+                {mode === 'login' && (
+                  <div className="text-right">
+                    <Link to="/forgot-password" className="text-sm text-brand-600 hover:text-brand-700">
+                      Forgot password?
+                    </Link>
+                  </div>
+                )}
               </div>
-              
+
               {/* Confirm Password field - only for signup */}
               {mode === 'signup' && (
                 <div className="space-y-2">
