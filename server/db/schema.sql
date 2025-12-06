@@ -203,7 +203,7 @@ CREATE TABLE IF NOT EXISTS ai_logs (
   FOREIGN KEY (booking_id) REFERENCES bookings(id)
 );
 
--- Tasks (from aiTasks)
+-- Tasks (from aiTasks, consolidated with recurring tasks)
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   property_id TEXT,
@@ -235,43 +235,25 @@ CREATE TABLE IF NOT EXISTS tasks (
   message_chain_ids TEXT,
   ongoing_conversation TEXT,
   priority TEXT DEFAULT 'medium',  -- low, medium, high, urgent
-  recurring_task_id TEXT,
   scheduled_at TIMESTAMP,
-  due_at TIMESTAMP,
   completed_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  -- Recurring task columns (consolidated)
+  is_recurring_template BOOLEAN DEFAULT false,  -- true = this is a template, not instance
+  parent_task_id TEXT,                          -- for instances, points to template
+  repeat_type TEXT DEFAULT 'NONE',              -- NONE | DAILY | WEEKLY | MONTHLY | INTERVAL
+  interval_days INTEGER DEFAULT 1,              -- used when repeat_type = INTERVAL
+  recurrence_end_date DATE,                     -- when recurrence stops
+  time_of_day TEXT DEFAULT '09:00',             -- HH:mm for scheduled time
+  max_occurrences INTEGER,                      -- optional limit on instances
+  occurrences_created INTEGER DEFAULT 0,        -- count of instances created
+  next_run_at TIMESTAMP,                        -- next scheduled run
+  last_run_at TIMESTAMP,                        -- last time instance was created
   FOREIGN KEY (property_id) REFERENCES properties(id),
   FOREIGN KEY (booking_id) REFERENCES bookings(id),
-  FOREIGN KEY (staff_id) REFERENCES staff(id)
-);
-
--- Recurring task templates
-CREATE TABLE IF NOT EXISTS recurring_tasks (
-  id TEXT PRIMARY KEY,
-  property_id TEXT NOT NULL,
-  booking_id TEXT,
-  phone TEXT,
-  title TEXT NOT NULL,
-  description TEXT,
-  task_bucket TEXT,
-  staff_id TEXT,
-  staff_name TEXT,
-  staff_phone TEXT,
-  repeat_type TEXT NOT NULL,              -- DAILY | WEEKLY | MONTHLY | INTERVAL
-  interval_days INTEGER,                  -- used when repeat_type = INTERVAL
-  start_date DATE NOT NULL,
-  end_date DATE,
-  time_of_day TEXT,                       -- HH:mm
-  max_occurrences INTEGER,
-  occurrences_created INTEGER DEFAULT 0,
-  next_run_at TIMESTAMP,
-  last_run_at TIMESTAMP,
-  is_active BOOLEAN DEFAULT 1,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (property_id) REFERENCES properties(id),
-  FOREIGN KEY (booking_id) REFERENCES bookings(id)
+  FOREIGN KEY (staff_id) REFERENCES staff(id),
+  FOREIGN KEY (parent_task_id) REFERENCES tasks(id)
 );
 
 -- Task archive (from d:taskLog)
@@ -326,6 +308,9 @@ CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_property ON tasks(property_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_phone ON tasks(phone);
+CREATE INDEX IF NOT EXISTS idx_tasks_recurring_template ON tasks(is_recurring_template);
+CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_next_run ON tasks(next_run_at);
 
 CREATE INDEX IF NOT EXISTS idx_bookings_property ON bookings(property_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_phone ON bookings(guest_phone);

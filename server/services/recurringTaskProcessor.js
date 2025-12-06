@@ -1,3 +1,8 @@
+/**
+ * Recurring Task Processor
+ * Uses consolidated tasks table with is_recurring_template = true
+ */
+
 import { v4 as uuidv4 } from 'uuid';
 import { getDbWithPrepare as getDb } from '../db/index.js';
 
@@ -41,38 +46,48 @@ export function computeNextRunAt(startDate, timeOfDay, repeatType, intervalDays,
   return next;
 }
 
-export async function createTaskFromRecurringTemplate(template) {
-  const db = getDb();
+/**
+ * Create a task instance from a recurring template
+ * @param {Object} db - Database connection
+ * @param {Object} template - Template task row
+ */
+async function createTaskInstanceFromTemplate(db, template) {
   const id = uuidv4();
   await db.prepare(`
     INSERT INTO tasks (
       id, property_id, booking_id, phone, task_request_title,
       guest_message, task_bucket, staff_id, staff_name, staff_phone,
-      recurring_task_id, action_holder, status, created_at, due_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Staff', 'Waiting on Staff', CURRENT_TIMESTAMP, ?)
+      parent_task_id, is_recurring_template, action_holder, status, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, false, 'Staff', 'Waiting on Staff', CURRENT_TIMESTAMP)
   `).run(
     id,
     template.property_id,
     template.booking_id || null,
     template.phone || null,
-    template.title,
-    template.description || '',
+    template.task_request_title,
+    template.guest_message || '',
     template.task_bucket || 'Other',
     template.staff_id || null,
     template.staff_name || null,
     template.staff_phone || null,
-    template.id,
-    template.next_run_at || null
+    template.id  // parent_task_id points to the template
   );
+  console.log(`[Recurring] Created task instance ${id} from template ${template.id}`);
   return id;
 }
 
+/**
+ * Process all active recurring task templates and create instances
+ */
 export async function processRecurringTasks() {
   const db = getDb();
   const now = new Date();
+  
+  // Query tasks that are recurring templates and due to run
   const templates = await db.prepare(`
-    SELECT * FROM recurring_tasks
-    WHERE is_active = 1
+    SELECT * FROM tasks
+    WHERE is_recurring_template = true
+      AND status != 'Cancelled'
       AND next_run_at IS NOT NULL
       AND next_run_at <= ?
   `).all(now.toISOString());
@@ -81,15 +96,17 @@ export async function processRecurringTasks() {
 
   for (const tpl of templates) {
     // End conditions
-    if (tpl.end_date && new Date(tpl.next_run_at) > new Date(tpl.end_date)) {
+    if (tpl.recurrence_end_date && new Date(tpl.next_run_at) > new Date(tpl.recurrence_end_date)) {
+      console.log(`[Recurring] Template ${tpl.id} past end date, skipping`);
       continue;
     }
-    if (tpl.max_occurrences && tpl.occurrences_created >= tpl.max_occurrences) {
+    if (tpl.max_occurrences && (tpl.occurrences_created || 0) >= tpl.max_occurrences) {
+      console.log(`[Recurring] Template ${tpl.id} reached max occurrences, skipping`);
       continue;
     }
 
-    // Create task
-    await createTaskFromRecurringTemplate(tpl);
+    // Create task instance
+    await createTaskInstanceFromTemplate(db, tpl);
     createdCount += 1;
 
     // Increment and schedule next
@@ -100,13 +117,13 @@ export async function processRecurringTasks() {
     );
 
     await db.prepare(`
-      UPDATE recurring_tasks
-      SET occurrences_created = occurrences_created + 1,
+      UPDATE tasks
+      SET occurrences_created = COALESCE(occurrences_created, 0) + 1,
           last_run_at = ?,
           next_run_at = ?
       WHERE id = ?
     `).run(
-      new Date().toISOString(),
+      now.toISOString(),
       nextRun.toISOString(),
       tpl.id
     );
@@ -114,4 +131,3 @@ export async function processRecurringTasks() {
 
   return { processed: templates.length, created: createdCount };
 }
-

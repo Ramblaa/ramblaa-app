@@ -418,10 +418,10 @@ export default function TasksPage() {
                         <Badge variant={priorityColors[task.priority] || 'secondary'}>
                           {task.priority} priority
                         </Badge>
-                        {task.recurringTaskId && (
+                        {task.isFromRecurring && (
                           <Badge variant="info" className="flex items-center gap-1">
                             <Repeat className="h-3 w-3" />
-                            Recurring
+                            From Template
                           </Badge>
                         )}
                       </div>
@@ -494,33 +494,33 @@ export default function TasksPage() {
                         <div className="flex flex-wrap gap-3 text-sm text-ink-500">
                           <span className="flex items-center gap-1">
                             <Clock className="h-4 w-4" />
-                            {template.repeat_type === 'DAILY' && 'Every day'}
-                            {template.repeat_type === 'WEEKLY' && 'Every week'}
-                            {template.repeat_type === 'MONTHLY' && 'Every month'}
-                            {template.repeat_type === 'INTERVAL' && `Every ${template.interval_days} days`}
+                            {template.repeatType === 'DAILY' && 'Every day'}
+                            {template.repeatType === 'WEEKLY' && 'Every week'}
+                            {template.repeatType === 'MONTHLY' && 'Every month'}
+                            {template.repeatType === 'INTERVAL' && `Every ${template.intervalDays} days`}
                           </span>
-                          {template.time_of_day && (
-                            <span>at {template.time_of_day}</span>
+                          {template.timeOfDay && (
+                            <span>at {template.timeOfDay}</span>
                           )}
-                          {template.staff_name && (
+                          {template.staffName && (
                             <span className="flex items-center gap-1">
                               <User className="h-4 w-4" />
-                              {template.staff_name}
+                              {template.staffName}
                             </span>
                           )}
                         </div>
                       </div>
                       <div className="flex flex-col sm:items-end gap-2">
                         <div className="flex gap-2">
-                          <Badge variant={template.is_active ? 'success' : 'secondary'}>
-                            {template.is_active ? 'Active' : 'Paused'}
+                          <Badge variant={template.isActive ? 'success' : 'secondary'}>
+                            {template.isActive ? 'Active' : 'Paused'}
                           </Badge>
                           <Badge variant="outline">
-                            {template.occurrences_created || 0} created
+                            {template.occurrencesCreated || 0} created
                           </Badge>
                         </div>
                         <p className="text-xs text-ink-400">
-                          Next: {template.next_run_at ? format(new Date(template.next_run_at), 'MMM d, yyyy') : 'N/A'}
+                          Next: {template.nextRunAt ? format(new Date(template.nextRunAt), 'MMM d, yyyy') : 'N/A'}
                         </p>
                       </div>
                     </div>
