@@ -2,6 +2,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { motion } from 'framer-motion'
 import LoginPage from './pages/LoginPage'
 import EmailVerificationPage from './pages/EmailVerificationPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import MessagesPage from './pages/MessagesPage'
 import TasksPage from './pages/TasksPage'
 import TaskDetailPage from './pages/TaskDetailPage'
@@ -47,7 +49,9 @@ function AppContent() {
         {/* Public Routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/verify-email" element={<EmailVerificationPage />} />
-        
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+
         {/* Protected Routes */}
         <Route path="/*" element={
           <ProtectedRoute>

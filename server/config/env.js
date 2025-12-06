@@ -41,6 +41,14 @@ export const config = {
     refreshTokenExpiry: '7d',
   },
 
+  // Email (SendGrid)
+  email: {
+    sendgridApiKey: process.env.SENDGRID_API_KEY,
+    fromAddress: process.env.EMAIL_FROM_ADDRESS || 'noreply@ramblaa.com',
+    fromName: process.env.EMAIL_FROM_NAME || 'Ramblaa',
+    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5174',
+  },
+
   // External Webhook
   webhook: {
     url: process.env.WEBHOOK_URL,

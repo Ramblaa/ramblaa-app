@@ -122,6 +122,34 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const forgotPassword = async (email) => {
+    try {
+      setIsLoading(true);
+      const response = await apiService.forgotPassword(email);
+      showSuccess('If an account with this email exists, a password reset link has been sent.');
+      return { success: true, message: response.message };
+    } catch (error) {
+      showError(error.message || 'Failed to send password reset email');
+      return { success: false, error: error.message };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resetPassword = async (token, password) => {
+    try {
+      setIsLoading(true);
+      const response = await apiService.resetPassword(token, password);
+      showSuccess('Password reset successfully! You can now sign in.');
+      return { success: true, message: response.message };
+    } catch (error) {
+      showError(error.message || 'Password reset failed');
+      return { success: false, error: error.message };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const updateProfile = async (profileData) => {
     try {
       const response = await apiService.updateProfile(profileData);
@@ -159,6 +187,8 @@ export const AuthProvider = ({ children }) => {
     signup,
     verifyEmail,
     resendVerification,
+    forgotPassword,
+    resetPassword,
     updateProfile,
     changePassword,
     isAdmin,

@@ -46,7 +46,12 @@ app.use(cors({
     }
     
     console.warn('[CORS] Blocked origin:', origin);
-    return callback(null, origin); // Allow all for now during development
+    // In production, block unknown origins
+    if (config.server.nodeEnv === 'production') {
+      return callback(new Error('Not allowed by CORS'), false);
+    }
+    // In development, allow for testing
+    return callback(null, origin);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -77,7 +82,7 @@ app.use(limiter);
 // Stricter rate limiting for auth endpoints
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 200, // limit each IP to 200 requests per windowMs for auth
+  max: 20, // limit each IP to 20 auth requests per 15 minutes
   message: 'Too many authentication attempts, please try again later.'
 });
 
