@@ -9,18 +9,18 @@
 @layer base {
   :root {
     /* ========================
-       Brand Palette (Sage Green)
+       Primary Blue Palette (#2563eb based)
        ======================== */
-    --brand-50: #F4F7F4;
-    --brand-100: #E8EFE8;
-    --brand-200: #C9D9C9;
-    --brand-300: #A3BEA3;
-    --brand-400: #7BA37B;
-    --brand-500: #5A8A5A;
-    --brand-600: #4A7A4A;
-    --brand-700: #3A633A;
-    --brand-800: #2D4D2D;
-    --brand-900: #1F361F;
+    --brand-50: #eff6ff;
+    --brand-100: #dbeafe;
+    --brand-200: #bfdbfe;
+    --brand-300: #93c5fd;
+    --brand-400: #60a5fa;
+    --brand-500: #3b82f6;
+    --brand-600: #2563eb;
+    --brand-700: #1d4ed8;
+    --brand-800: #1e40af;
+    --brand-900: #1e3a8a;
 
     /* ========================
        Ink Palette (Charcoal Neutrals)
@@ -86,7 +86,8 @@
     --border: var(--ink-200);
     --input: var(--ink-200);
 
-    --primary: var(--brand-600);
+    /* Primary is now Blue */
+    --primary: #2563eb;
     --primary-foreground: #ffffff;
 
     --secondary: var(--ink-100);
@@ -120,7 +121,7 @@
     --border: var(--ink-700);
     --input: var(--ink-700);
 
-    --primary: var(--brand-500);
+    --primary: #3b82f6;
     --primary-foreground: #ffffff;
 
     --secondary: var(--ink-700);

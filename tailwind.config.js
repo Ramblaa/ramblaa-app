@@ -55,18 +55,25 @@ export default {
           DEFAULT: "var(--card)",
           foreground: "var(--card-foreground)",
         },
-        // Brand palette (Sage Green)
+        // Primary Blue palette (#2563eb based)
         brand: {
-          50: "#F4F7F4",
-          100: "#E8EFE8",
-          200: "#C9D9C9",
-          300: "#A3BEA3",
-          400: "#7BA37B",
-          500: "#5A8A5A",
-          600: "#4A7A4A",
-          700: "#3A633A",
-          800: "#2D4D2D",
-          900: "#1F361F",
+          50: "#eff6ff",
+          100: "#dbeafe",
+          200: "#bfdbfe",
+          300: "#93c5fd",
+          400: "#60a5fa",
+          500: "#3b82f6",
+          600: "#2563eb",
+          700: "#1d4ed8",
+          800: "#1e40af",
+          900: "#1e3a8a",
+          // Legacy sidebar colors (backward compatibility)
+          dark: "#1A1A1D",
+          "mid-gray": "#4E4E50",
+          "light-gray": "#9CA3AF",
+          light: "#F5F5F5",
+          purple: "#2563eb", // Map old purple to new blue
+          vanilla: "#dbeafe", // Map old vanilla to light blue
         },
         // Ink palette (Charcoal neutrals)
         ink: {
