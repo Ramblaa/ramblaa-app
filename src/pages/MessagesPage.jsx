@@ -270,15 +270,21 @@ export default function MessagesPage() {
     }
   }
 
-  const renderTaskLinks = (taskIds, taskAction) => {
+  const renderTaskLinks = (taskIds, taskAction, isHostMessage = false) => {
     if (!taskIds || taskIds.length === 0) return null
 
     // Show "Task created" or "Task updated" based on taskAction
     const label = taskAction === 'created' ? 'Task created:' : 'Task updated:'
 
     return (
-      <div className="mt-2 pt-2 border-t border-ink-300/20">
-        <div className="flex items-center gap-1 text-xs text-ink-500 mb-1">
+      <div className={cn(
+        "mt-2 pt-2 border-t",
+        isHostMessage ? "border-white/20" : "border-ink-300/20"
+      )}>
+        <div className={cn(
+          "flex items-center gap-1 text-xs mb-1",
+          isHostMessage ? "text-white/80" : "text-ink-500"
+        )}>
           <CheckSquare className="h-3 w-3" />
           <span>{label}</span>
         </div>
@@ -287,13 +293,18 @@ export default function MessagesPage() {
             <button
               key={taskId}
               onClick={() => handleTaskLink(taskId)}
-              className="flex items-center gap-2 text-xs text-brand-600 hover:text-brand-600/80 transition-colors group"
+              className={cn(
+                "flex items-center gap-2 text-xs transition-colors group",
+                isHostMessage 
+                  ? "text-white hover:text-white/80" 
+                  : "text-brand-600 hover:text-brand-700"
+              )}
             >
               <div className={cn(
                 "w-2 h-2 rounded-full",
-                taskAction === 'created' ? "bg-green-500" : "bg-yellow-500"
+                taskAction === 'created' ? "bg-green-400" : "bg-yellow-400"
               )} />
-              <span className="flex-1 text-left truncate">Task {taskId.slice(0, 8)}...</span>
+              <span className="flex-1 text-left truncate underline underline-offset-2">Task {taskId.slice(0, 8)}...</span>
               <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
             </button>
           ))}
@@ -526,7 +537,7 @@ export default function MessagesPage() {
                         </p>
                         
                         {/* Task Links */}
-                        {renderTaskLinks(message.taskIds, message.taskAction)}
+                        {renderTaskLinks(message.taskIds, message.taskAction, message.sender === 'host')}
                       </div>
                     </div>
                   </motion.div>
