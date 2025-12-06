@@ -10,7 +10,7 @@ import ResourcesPage from './pages/ResourcesPage'
 import PropertiesPage from './pages/PropertiesPage'
 import StaffPage from './pages/StaffPage'
 import BookingsPage from './pages/BookingsPage'
-import PromptPage from './pages/PromptPage'
+import ScheduledMessagesPage from './pages/ScheduledMessagesPage'
 import SettingsPage from './pages/SettingsPage'
 import SandboxPage from './pages/SandboxPage'
 import Layout from './components/Layout'
@@ -23,7 +23,7 @@ function ProtectedRoute({ children }) {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brand-purple to-brand-dark">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brand-600 to-ink-900">
         <motion.div
           animate={{ rotate: 360 }}
           transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
@@ -64,8 +64,8 @@ function AppContent() {
                 <Route path="/properties" element={<PropertiesPage />} />
                 <Route path="/bookings" element={<BookingsPage />} />
                 <Route path="/staff" element={<StaffPage />} />
+                <Route path="/scheduled" element={<ScheduledMessagesPage />} />
                 <Route path="/contacts" element={<Navigate to="/staff" replace />} />
-                <Route path="/prompt" element={<PromptPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>
             </Layout>

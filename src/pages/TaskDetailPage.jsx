@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Send, Bot, BotOff, UserCircle, Users, User, MessageCircle, Clock, MapPin, Calendar, Loader2 } from 'lucide-react'
+import { ArrowLeft, Send, Bot, BotOff, UserCircle, Users, User, MessageCircle, Clock, MapPin, Calendar, Loader2, ChevronDown, AlertCircle } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Card, CardContent } from '../components/ui/card'
@@ -8,6 +8,21 @@ import { Badge } from '../components/ui/badge'
 import { cn } from '../lib/utils'
 import { useParams, useNavigate } from 'react-router-dom'
 import { tasksApi, messagesApi, staffApi } from '../lib/api'
+
+const STATUS_OPTIONS = [
+  { value: 'pending', label: 'Pending', color: 'bg-yellow-100 text-yellow-700' },
+  { value: 'in-progress', label: 'In Progress', color: 'bg-blue-100 text-blue-700' },
+  { value: 'scheduled', label: 'Scheduled', color: 'bg-indigo-100 text-indigo-700' },
+  { value: 'completed', label: 'Completed', color: 'bg-green-100 text-green-700' },
+  { value: 'escalated', label: 'Escalated', color: 'bg-red-100 text-red-700' },
+]
+
+const PRIORITY_OPTIONS = [
+  { value: 'low', label: 'Low', color: 'bg-gray-100 text-gray-600' },
+  { value: 'medium', label: 'Medium', color: 'bg-yellow-100 text-yellow-700' },
+  { value: 'high', label: 'High', color: 'bg-orange-100 text-orange-700' },
+  { value: 'urgent', label: 'Urgent', color: 'bg-red-100 text-red-700' },
+]
 
 const typeIcons = {
   cleaning: 'bg-blue-100 text-blue-600',
@@ -43,11 +58,31 @@ export default function TaskDetailPage() {
   const [staffList, setStaffList] = useState([])
   const [showStaffSelector, setShowStaffSelector] = useState(false)
   const [assigning, setAssigning] = useState(false)
+  const [showStatusDropdown, setShowStatusDropdown] = useState(false)
+  const [showPriorityDropdown, setShowPriorityDropdown] = useState(false)
+  const [updating, setUpdating] = useState(false)
 
   // Ref for scrolling to latest message
   const messagesEndRef = useRef(null)
   // Track if this is the initial load for the conversation
   const isInitialLoad = useRef(true)
+  // Refs for dropdown click-outside handling
+  const statusDropdownRef = useRef(null)
+  const priorityDropdownRef = useRef(null)
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (statusDropdownRef.current && !statusDropdownRef.current.contains(event.target)) {
+        setShowStatusDropdown(false)
+      }
+      if (priorityDropdownRef.current && !priorityDropdownRef.current.contains(event.target)) {
+        setShowPriorityDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // Scroll to bottom of messages
   const scrollToBottom = (instant = false) => {
@@ -81,6 +116,22 @@ export default function TaskDetailPage() {
       setStaffList(staff)
     } catch (err) {
       console.error('Failed to load staff:', err)
+    }
+  }
+
+  // Update task status or priority
+  async function handleUpdateTask(updates) {
+    try {
+      setUpdating(true)
+      await tasksApi.updateTask(taskId, updates)
+      setShowStatusDropdown(false)
+      setShowPriorityDropdown(false)
+      // Reload task to get updated data
+      await loadTask()
+    } catch (err) {
+      console.error('Failed to update task:', err)
+    } finally {
+      setUpdating(false)
     }
   }
 
@@ -295,11 +346,11 @@ export default function TaskDetailPage() {
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-brand-purple" />
+        <Loader2 className="h-8 w-8 animate-spin text-brand-600" />
       </div>
     )
   }
-
+  
   if (!task) {
     return (
       <div className="p-6">
@@ -308,8 +359,8 @@ export default function TaskDetailPage() {
           Back
         </Button>
         <div className="text-center">
-          <h2 className="text-lg font-medium text-brand-dark">Task not found</h2>
-          <p className="text-brand-mid-gray">The requested task could not be found.</p>
+          <h2 className="text-lg font-medium text-ink-900">Task not found</h2>
+          <p className="text-ink-500">The requested task could not be found.</p>
         </div>
       </div>
     )
@@ -326,16 +377,16 @@ export default function TaskDetailPage() {
     
     try {
       setSending(true)
-      
-      // When sending a message, disable auto-response for this conversation
-      setConversationStates(prev => ({
-        ...prev,
-        [selectedConversation.id]: {
-          ...prev[selectedConversation.id],
-          autoResponseEnabled: false
-        }
-      }))
-      
+    
+    // When sending a message, disable auto-response for this conversation
+    setConversationStates(prev => ({
+      ...prev,
+      [selectedConversation.id]: {
+        ...prev[selectedConversation.id],
+        autoResponseEnabled: false
+      }
+    }))
+    
       // Send via API if we have a phone
       if (selectedConversation.phone) {
         await messagesApi.sendMessage({
@@ -360,7 +411,7 @@ export default function TaskDetailPage() {
         setSelectedConversation(updatedTask.conversations[convIdx])
       }
       
-      setNewMessage('')
+    setNewMessage('')
     } catch (err) {
       console.error('Failed to send message:', err)
     } finally {
@@ -426,14 +477,86 @@ export default function TaskDetailPage() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
-                <h1 className="text-lg font-bold text-brand-dark">{task.title}</h1>
-                <Badge className={`text-xs ${statusInfo.color}`}>
+                <h1 className="text-lg font-bold text-ink-900">{task.title}</h1>
+                
+                {/* Status Dropdown */}
+                <div className="relative" ref={statusDropdownRef}>
+                  <button
+                    onClick={() => {
+                      setShowStatusDropdown(!showStatusDropdown)
+                      setShowPriorityDropdown(false)
+                    }}
+                    disabled={updating}
+                    className={cn(
+                      "text-xs px-2 py-1 rounded-full flex items-center gap-1 transition-colors",
+                      statusInfo.color,
+                      "hover:opacity-80 cursor-pointer"
+                    )}
+                  >
                   {statusInfo.label}
-                </Badge>
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                  
+                  {showStatusDropdown && (
+                    <div className="absolute top-full left-0 mt-1 bg-white rounded-lg shadow-lg border z-50 min-w-32">
+                      {STATUS_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          onClick={() => handleUpdateTask({ status: option.value })}
+                          className={cn(
+                            "w-full px-3 py-2 text-left text-xs hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg flex items-center gap-2",
+                            task.status === option.value && "bg-gray-50"
+                          )}
+                        >
+                          <span className={cn("w-2 h-2 rounded-full", option.color.replace('text-', 'bg-').split(' ')[0])} />
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Priority Dropdown */}
+                <div className="relative" ref={priorityDropdownRef}>
+                  <button
+                    onClick={() => {
+                      setShowPriorityDropdown(!showPriorityDropdown)
+                      setShowStatusDropdown(false)
+                    }}
+                    disabled={updating}
+                    className={cn(
+                      "text-xs px-2 py-1 rounded-full flex items-center gap-1 transition-colors",
+                      PRIORITY_OPTIONS.find(p => p.value === task.priority)?.color || 'bg-gray-100 text-gray-600',
+                      "hover:opacity-80 cursor-pointer"
+                    )}
+                  >
+                    <AlertCircle className="h-3 w-3" />
+                    {PRIORITY_OPTIONS.find(p => p.value === task.priority)?.label || 'Priority'}
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                  
+                  {showPriorityDropdown && (
+                    <div className="absolute top-full left-0 mt-1 bg-white rounded-lg shadow-lg border z-50 min-w-32">
+                      {PRIORITY_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          onClick={() => handleUpdateTask({ priority: option.value })}
+                          className={cn(
+                            "w-full px-3 py-2 text-left text-xs hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg flex items-center gap-2",
+                            task.priority === option.value && "bg-gray-50"
+                          )}
+                        >
+                          <span className={cn("w-2 h-2 rounded-full", option.color.replace('text-', 'bg-').split(' ')[0])} />
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-              <p className="text-sm text-brand-mid-gray mt-1">{task.description}</p>
+              <p className="text-sm text-ink-500 mt-1">{task.description}</p>
               
-              <div className="flex flex-wrap gap-3 text-xs text-brand-mid-gray mt-2">
+              <div className="flex flex-wrap gap-3 text-xs text-ink-500 mt-2">
                 <div className="flex items-center gap-1">
                   <MapPin className="h-3 w-3" />
                   <span>{task.property}</span>
@@ -441,24 +564,24 @@ export default function TaskDetailPage() {
                 <div className="flex items-center gap-1">
                   <User className="h-3 w-3" />
                   {task.assignee && task.assignee !== 'Unassigned' ? (
-                    <span>{task.assignee}</span>
+                  <span>{task.assignee}</span>
                   ) : (
                     <button
                       onClick={() => {
                         loadStaff(task.propertyId)
                         setShowStaffSelector(true)
                       }}
-                      className="text-brand-purple hover:underline font-medium"
+                      className="text-brand-600 hover:underline font-medium"
                     >
                       Unassigned - Click to assign
                     </button>
                   )}
                 </div>
                 {task.dueDate && (
-                  <div className="flex items-center gap-1">
-                    <Calendar className="h-3 w-3" />
+                <div className="flex items-center gap-1">
+                  <Calendar className="h-3 w-3" />
                     <span>{task.dueDate} {task.dueTime ? `at ${task.dueTime}` : ''}</span>
-                  </div>
+                </div>
                 )}
               </div>
             </div>
@@ -468,7 +591,7 @@ export default function TaskDetailPage() {
         {/* Conversations List */}
         <div className="overflow-y-auto">
           <div className="p-4">
-            <h2 className="text-sm font-medium text-brand-dark mb-3">Task Communications</h2>
+            <h2 className="text-sm font-medium text-ink-900 mb-3">Task Communications</h2>
           </div>
           
           {sortedConversations.map((conversation) => {
@@ -485,17 +608,17 @@ export default function TaskDetailPage() {
                 whileHover={{ backgroundColor: 'rgba(154, 23, 80, 0.05)' }}
                 className={cn(
                   "p-4 border-b cursor-pointer transition-colors",
-                  selectedConversation?.id === conversation.id ? "bg-brand-purple/10 border-brand-purple/20" : ""
+                  selectedConversation?.id === conversation.id ? "bg-brand-600/10 border-brand-600/20" : ""
                 )}
                 onClick={() => setSelectedConversation(conversation)}
               >
                 <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-brand-purple text-white">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-brand-600 text-white">
                     <MessageCircle className="h-5 w-5" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-medium text-brand-dark text-sm">All Communications</h3>
+                      <h3 className="font-medium text-ink-900 text-sm">All Communications</h3>
                     </div>
                     
                     {/* Participant badges */}
@@ -512,14 +635,14 @@ export default function TaskDetailPage() {
                       )}
                     </div>
                     
-                    <p className="text-sm text-brand-mid-gray truncate">
+                    <p className="text-sm text-ink-500 truncate">
                       {lastMessage?.senderName}: {lastMessage?.text || 'No messages'}
                     </p>
                     <div className="flex items-center justify-between mt-1">
-                      <p className="text-xs text-brand-mid-gray">{conversation.lastActivity}</p>
+                      <p className="text-xs text-ink-500">{conversation.lastActivity}</p>
                       <div className="flex items-center gap-1">
                         {guestCount > 0 && (
-                          <Badge variant="outline" className="text-xs">
+                      <Badge variant="outline" className="text-xs">
                             <UserCircle className="h-3 w-3 mr-1" />{guestCount}
                           </Badge>
                         )}
@@ -529,9 +652,9 @@ export default function TaskDetailPage() {
                           </Badge>
                         )}
                         {hostCount > 0 && (
-                          <Badge className="text-xs bg-brand-purple text-white">
+                          <Badge className="text-xs bg-brand-600 text-white">
                             <Bot className="h-3 w-3 mr-1" />{hostCount}
-                          </Badge>
+                      </Badge>
                         )}
                       </div>
                     </div>
@@ -561,12 +684,12 @@ export default function TaskDetailPage() {
                 >
                   <ArrowLeft className="h-5 w-5" />
                 </Button>
-                <div className="w-10 h-10 rounded-full flex items-center justify-center bg-brand-purple text-white">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center bg-brand-600 text-white">
                   <MessageCircle className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="font-semibold text-brand-dark">Task Communications</h2>
-                  <p className="text-xs text-brand-mid-gray flex items-center gap-2">
+                  <h2 className="font-semibold text-ink-900">Task Communications</h2>
+                  <p className="text-xs text-ink-500 flex items-center gap-2">
                     <span className="flex items-center gap-1">
                       <UserCircle className="h-3 w-3" />
                       {selectedConversation.guestName || 'Guest'}
@@ -588,7 +711,7 @@ export default function TaskDetailPage() {
 
               {/* Auto Response Toggle */}
               <div className="flex items-center gap-3">
-                <span className="text-sm text-brand-mid-gray">Auto Response</span>
+                <span className="text-sm text-ink-500">Auto Response</span>
                 <Button
                   variant={isAutoResponseEnabled ? "default" : "outline"}
                   size="sm"
@@ -596,8 +719,8 @@ export default function TaskDetailPage() {
                   className={cn(
                     "transition-all duration-200",
                     isAutoResponseEnabled 
-                      ? "bg-brand-purple hover:bg-brand-purple/90 text-white" 
-                      : "border-brand-purple text-brand-purple hover:bg-brand-purple/10"
+                      ? "bg-brand-600 hover:bg-brand-600/90 text-white" 
+                      : "border-brand-600 text-brand-600 hover:bg-brand-600/10"
                   )}
                 >
                   {isAutoResponseEnabled ? (
@@ -623,29 +746,29 @@ export default function TaskDetailPage() {
                   const isInbound = message.sender === 'guest' || message.sender === 'staff'
                   
                   return (
-                    <motion.div
-                      key={message.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
+                  <motion.div
+                    key={message.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.05 }}
-                      className={cn(
-                        "flex",
+                    className={cn(
+                      "flex",
                         isInbound ? "justify-start" : "justify-end",
-                        message.isSystemMessage && "opacity-60 justify-center"
-                      )}
-                    >
-                      {message.isSystemMessage ? (
-                        <div className="bg-gray-100 text-gray-600 italic text-sm px-3 py-2 rounded-lg max-w-md text-center">
-                          {message.text}
-                        </div>
-                      ) : (
-                        <div className={cn(
-                          "max-w-xs lg:max-w-md",
+                      message.isSystemMessage && "opacity-60 justify-center"
+                    )}
+                  >
+                    {message.isSystemMessage ? (
+                      <div className="bg-gray-100 text-gray-600 italic text-sm px-3 py-2 rounded-lg max-w-md text-center">
+                        {message.text}
+                      </div>
+                    ) : (
+                      <div className={cn(
+                        "max-w-xs lg:max-w-md",
                           isInbound ? "mr-12" : "ml-12"
                         )}>
                           {/* Sender badge - show for all messages */}
                           <div className={cn("flex mb-1", isInbound ? "justify-start" : "justify-end")}>
-                            <div className="flex items-center gap-1 text-xs text-brand-mid-gray">
+                            <div className="flex items-center gap-1 text-xs text-ink-500">
                               {message.sender === 'guest' ? (
                                 <>
                                   <UserCircle className="h-3 w-3" />
@@ -669,29 +792,29 @@ export default function TaskDetailPage() {
                               )}
                             </div>
                           </div>
-                          <div className={cn(
-                            "px-4 py-2 rounded-lg",
-                            message.sender === 'guest'
-                              ? "bg-brand-vanilla text-brand-dark"
+                        <div className={cn(
+                          "px-4 py-2 rounded-lg",
+                          message.sender === 'guest'
+                              ? "bg-brand-100 text-ink-900"
                               : message.sender === 'staff'
                                 ? "bg-orange-100 text-orange-900 border border-orange-200"  // Staff = orange
-                                : "bg-brand-purple text-white"  // Host/Rambley = purple
-                          )}>
-                            <p className="text-sm">{message.text}</p>
-                            <p className={cn(
-                              "text-xs mt-1",
-                              message.sender === 'guest'
-                                ? "text-brand-mid-gray"
+                                : "bg-brand-600 text-white"  // Host/Rambley = purple
+                        )}>
+                          <p className="text-sm">{message.text}</p>
+                          <p className={cn(
+                            "text-xs mt-1",
+                            message.sender === 'guest'
+                                ? "text-ink-500"
                                 : message.sender === 'staff'
                                   ? "text-orange-600"
                                   : "text-white/70"
-                            )}>
-                              {message.timestamp}
-                            </p>
-                          </div>
+                          )}>
+                            {message.timestamp}
+                          </p>
                         </div>
-                      )}
-                    </motion.div>
+                      </div>
+                    )}
+                  </motion.div>
                   )
                 })}
               </AnimatePresence>
@@ -702,8 +825,8 @@ export default function TaskDetailPage() {
             {/* Message Input */}
             <div className="p-4 border-t bg-background">
               {!isAutoResponseEnabled && (
-                <div className="mb-3 p-2 bg-brand-vanilla/50 rounded-lg border border-brand-vanilla">
-                  <div className="flex items-center gap-2 text-sm text-brand-dark">
+                <div className="mb-3 p-2 bg-brand-100/50 rounded-lg border border-brand-200">
+                  <div className="flex items-center gap-2 text-sm text-ink-900">
                     <BotOff className="h-4 w-4" />
                     <span>Auto-response is disabled. You're in manual mode for this conversation.</span>
                   </div>
@@ -721,7 +844,7 @@ export default function TaskDetailPage() {
                   {sending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Send className="h-4 w-4" />
+                  <Send className="h-4 w-4" />
                   )}
                 </Button>
               </form>
@@ -730,9 +853,9 @@ export default function TaskDetailPage() {
         ) : (
           <div className="flex-1 flex items-center justify-center bg-brand-light/50">
             <div className="text-center">
-              <MessageCircle className="mx-auto h-12 w-12 text-brand-mid-gray mb-4" />
-              <h3 className="text-lg font-medium text-brand-dark mb-2">Select a conversation</h3>
-              <p className="text-brand-mid-gray">Choose a person to view your communication with them</p>
+              <MessageCircle className="mx-auto h-12 w-12 text-ink-500 mb-4" />
+              <h3 className="text-lg font-medium text-ink-900 mb-2">Select a conversation</h3>
+              <p className="text-ink-500">Choose a person to view your communication with them</p>
             </div>
           </div>
         )}
@@ -747,13 +870,13 @@ export default function TaskDetailPage() {
             className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[80vh] overflow-hidden"
           >
             <div className="p-4 border-b">
-              <h2 className="text-lg font-semibold text-brand-dark">Assign Staff Member</h2>
-              <p className="text-sm text-brand-mid-gray">Select a staff member to handle this task</p>
+              <h2 className="text-lg font-semibold text-ink-900">Assign Staff Member</h2>
+              <p className="text-sm text-ink-500">Select a staff member to handle this task</p>
             </div>
             
             <div className="overflow-y-auto max-h-[50vh]">
               {staffList.length === 0 ? (
-                <div className="p-4 text-center text-brand-mid-gray">
+                <div className="p-4 text-center text-ink-500">
                   <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
                   <p>Loading staff...</p>
                 </div>
@@ -770,14 +893,14 @@ export default function TaskDetailPage() {
                         {staff.name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'ST'}
                       </div>
                       <div className="flex-1">
-                        <h3 className="font-medium text-brand-dark">{staff.name}</h3>
-                        <p className="text-sm text-brand-mid-gray">{staff.role || 'Staff'}</p>
+                        <h3 className="font-medium text-ink-900">{staff.name}</h3>
+                        <p className="text-sm text-ink-500">{staff.role || 'Staff'}</p>
                         {staff.phone && (
-                          <p className="text-xs text-brand-mid-gray">{staff.phone}</p>
+                          <p className="text-xs text-ink-500">{staff.phone}</p>
                         )}
                       </div>
                       {assigning && (
-                        <Loader2 className="h-4 w-4 animate-spin text-brand-purple" />
+                        <Loader2 className="h-4 w-4 animate-spin text-brand-600" />
                       )}
                     </button>
                   ))}
@@ -800,7 +923,7 @@ export default function TaskDetailPage() {
       )}
     </div>
   )
-}
+} 
 
 // Mock task for fallback
 function getMockTask(taskId) {

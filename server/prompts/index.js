@@ -145,30 +145,39 @@ Rules:
    - The Action Title represents what the guest JUST requested
    - Verify the Action Title matches content in the CURRENT MESSAGE
    - Do not use historical messages to change or reinterpret the Action Title
-2) AvailablePropertyKnowledge = "Yes" ONLY if the action can be fully answered from Booking/Property/FAQs JSON. If staff action or missing info is needed → "No".
-3) PropertyKnowledgeCategory ∈ {"Booking Details","Property Details","Property FAQs","None"}. Use "None" if no source suffices.
-4) FAQCategory: set only when PropertyKnowledgeCategory == "Property FAQs". Pick the single best item from FAQs Available (exact text) or "".
-5) TaskRequired = true ONLY if the action needs operational work or coordination beyond knowledge.
-6) If TaskRequired == false → TaskBucket = "" and TaskRequestTitle = "".
-7) If TaskRequired == true:
+
+2) Determine if this is a REQUEST vs an INFO QUESTION:
+   - REQUEST: Guest wants something done (early check-in, towels, cleaning, etc.) → TaskRequired = true
+   - INFO QUESTION: Guest just wants information (what time is check-in?, wifi password?) → TaskRequired = false
+   - HYBRID: Guest asks about something where FAQ says "upon request" or "subject to availability" 
+     → This IS a request, so TaskRequired = true
+
+3) AvailablePropertyKnowledge = "Yes" if relevant info exists in Booking/Property/FAQs JSON (even if task is also needed).
+4) PropertyKnowledgeCategory ∈ {"Booking Details","Property Details","Property FAQs","None"}. Use "None" if no source suffices.
+5) FAQCategory: set only when PropertyKnowledgeCategory == "Property FAQs". Pick the single best item from FAQs Available (exact text) or "".
+6) TaskRequired = true if the guest is REQUESTING something that requires coordination, even if FAQ info exists.
+   - "Can I check-in early?" → YES, this is a REQUEST for early check-in
+   - "What time is check-in?" → NO, this is just asking for info
+   - "Can I get towels?" → YES, this is a REQUEST
+7) If TaskRequired == false → TaskBucket = "" and TaskRequestTitle = "".
+8) If TaskRequired == true:
    - TaskBucket: Select the task from "Tasks Available" that BEST MATCHES the Action Title's subject
-   - The Action Title contains the guest's actual request - match it semantically
-   - If no task matches the Action Title's subject, use "Other"
+   - If no task matches, use "Other"
    - TaskRequestTitle: short, specific, staff-facing (≤ 12 words), describing only THIS action.
-8) AiResponse style:
+9) AiResponse style:
    - Clear, objective, informative. No greeting, sign-off, emojis, exclamations, or names.
    - 1–2 sentences. Do NOT ask the guest any questions.
-   - Do not invent values not present in JSON. Repeat codes/times exactly as written when applicable.
-9) AiResponse generation logic:
-   - If TaskRequired == true:
-     • If TaskBucket == "Other" (or not in Tasks Available) → 
-       AiResponse = "I understood your task request, let me check with the staff and host on the details of this for you".
-     • Else → 
-       AiResponse = "We'll reach out to our staff to organise the {{TaskBucket}} task for you."
-   - Else if TaskRequired == false:
-     • If AvailablePropertyKnowledge == "Yes" → provide the direct answer succinctly using the JSON sources.
-     • If AvailablePropertyKnowledge == "No" → 
-       AiResponse = "I understood your request, let me check with the staff and host on the details of this for you".
+   - Do not invent values not present in JSON.
+10) AiResponse generation logic:
+   - If TaskRequired == true AND AvailablePropertyKnowledge == "Yes":
+     • Include the FAQ info AND indicate you'll coordinate the request
+     • Example: "Standard check-in is from 2:00 PM. I'll check with the host about early check-in availability for you."
+   - If TaskRequired == true AND AvailablePropertyKnowledge == "No":
+     • "I understood your request, let me check with the staff and host on the details of this for you."
+   - If TaskRequired == false AND AvailablePropertyKnowledge == "Yes":
+     • Provide the direct answer succinctly using the JSON sources.
+   - If TaskRequired == false AND AvailablePropertyKnowledge == "No":
+     • "I understood your request, let me check with the staff and host on the details of this for you."
 10) Keep 'UrgencyIndicators' and 'EscalationRiskIndicators' concise. Use "None" if not applicable.
 11) Output STRICT JSON ONLY with these keys, in this order:
 {
@@ -493,32 +502,37 @@ Thread context (guest & staff, oldest → newest):
 {{THREAD_CONTEXT}}
 
 Write ONLY in {{LANG}}.
-Style: neutral and professional; no emojis; no names; no greeting or sign-off. Max 3 sentences (aim for 1–2 if fully completed).
+Style: neutral and professional; no emojis; no names; no greeting or sign-off. Max 2 sentences (aim for 1 if simple).
 Include only details directly relevant to {{TASK_SCOPE}} (e.g., times, quantities, access notes) when present.
 
-Decision logic (use the most recent Staff — Inbound in the thread):
-- If that message clearly indicates the task is completed ("done", "finished", "delivered", "installed", "changed", "resolved", etc.), inform the guest it's completed using natural phrasing.
-- If that message proposes or confirms a future time, repeat the time **exactly as written** (no timezone math/reformatting) and confirm we'll follow through then.
-- If status is ambiguous, default to a scheduled/confirmation style (e.g., "We've scheduled this and will confirm once completed.").
+CRITICAL - Distinguish request types:
+
+**APPROVAL/PERMISSION REQUESTS** (e.g., early check-in, late check-out, special access):
+- If staff APPROVED → Confirm the approval directly (e.g., "You can check in at 11am.")
+- Do NOT say "we've scheduled this" - approval doesn't need scheduling
+- Do NOT say "we'll confirm once completed" - approval IS the completion
+
+**PHYSICAL DELIVERY/ACTION TASKS** (e.g., towels, cleaning, repairs):
+- If staff has DONE IT → Confirm completion (e.g., "Fresh towels have been delivered.")
+- If staff WILL DO IT at a future time → Confirm the time (e.g., "Fresh towels will be brought at 9am tomorrow.")
+
+Decision logic (use the most recent Staff — Inbound):
+1. Identify if this is an APPROVAL request or a PHYSICAL ACTION request
+2. For approvals: Staff saying "yes", "that's fine", "you can", "11am works" = RESOLVED
+3. For physical actions: Staff confirming future delivery = scheduled; staff confirming done = completed
+4. Repeat times/details exactly as staff wrote them
 
 Scope guard:
-- Reply **only** about **{{TASK_SCOPE}}**. Omit unrelated items from the thread (e.g., Wi-Fi, address, directions) unless they are explicitly part of **{{TASK_SCOPE}}** right now.
-- Do not invent or guess details; only use what appears in the thread/context. If unsure, use the scheduled/confirmation style.
+- Reply **only** about **{{TASK_SCOPE}}**. 
+- Do not invent or guess details; only use what appears in the thread.
 
 Time handling:
-- Treat relative phrases ("tomorrow", "this evening", "after 3pm", "between 9–11", "morning", etc.) as valid windows.
-- If the guest said "any time / whenever / no preference," consider the time requirement satisfied—do not re-ask—and confirm accordingly.
-- When repeating a time, use the exact phrasing from the latest relevant message.
-- Treat "ASAP / as soon as possible / now / immediately" as a valid immediate window.
-
-
-Recency & conflicts:
-- Prefer the **latest Staff — Inbound**. If a newer Guest message changes timing but staff hasn't reconfirmed, acknowledge the requested time and state we'll confirm once staff reconfirms.
-- If older updates conflict with newer ones, the newer message prevails.
+- Treat relative phrases ("tomorrow", "this evening", "after 3pm") as valid.
+- Repeat the exact time/window from staff's message.
 
 Safety & privacy:
 - Do not include sensitive codes/keys or internal process details.
-- Do not mention staff names or internal tooling.
+- Do not mention staff names.
 
 Return ONLY the message body (no metadata).
 `;

@@ -30,9 +30,13 @@ export async function createTasksFromAiLogs() {
   const created = [];
 
   // Get AI logs that need task creation (INTEGER columns: 1=true, 0=false)
+  // Only process logs from the last 24 hours to avoid old/stale data
   const logs = await db.prepare(`
     SELECT * FROM ai_logs 
-    WHERE task_required = 1 AND task_created = 0 AND recipient_type = 'Guest'
+    WHERE task_required = 1 
+    AND task_created = 0 
+    AND recipient_type = 'Guest'
+    AND created_at > NOW() - INTERVAL '24 hours'
     ORDER BY created_at ASC
   `).all();
 
@@ -52,17 +56,17 @@ export async function createTasksFromAiLogs() {
     console.log(`[TaskManager]   to_number: ${log.to_number}`);
     console.log(`[TaskManager] ========================================`);
     
-    if (!log.task_bucket) {
-      console.log(`[TaskManager] ✗ Skipping - no task bucket`);
-      continue;
-    }
-    
-    // Skip if bucket is "Other" or empty (no matching task definition found by AI)
-    if (log.task_bucket === 'Other' || !log.task_bucket || log.task_bucket.trim() === '') {
-      console.log(`[TaskManager] ✗ Skipping unmatched bucket: "${log.task_bucket}"`);
-      await db.prepare(`UPDATE ai_logs SET task_created = 1 WHERE id = ?`).run(log.id);
-      continue;
-    }
+    // Wrap in try-catch to ALWAYS mark log as processed, even on error
+    try {
+      // Skip only if bucket is empty (AI didn't identify any task)
+      // "Other" bucket is VALID - these are requests that don't match predefined categories
+      if (!log.task_bucket || log.task_bucket.trim() === '') {
+        console.log(`[TaskManager] ✗ Skipping - no task bucket identified`);
+        await db.prepare(`UPDATE ai_logs SET task_created = 1 WHERE id = ?`).run(log.id);
+        continue;
+      }
+      
+      console.log(`[TaskManager] Creating task for bucket: "${log.task_bucket}" (Other buckets are valid!)`)
     
     // Try to find property_id if missing
     let propertyId = log.property_id;
@@ -214,6 +218,18 @@ export async function createTasksFromAiLogs() {
 
     console.log(`[TaskManager] Task ${taskId} created, assigned to: ${task.staff_name || 'unassigned'}`);
     created.push(task);
+    
+    } catch (taskError) {
+      // CRITICAL: Always mark the log as processed, even on error
+      // This prevents the same log from being reprocessed and causing duplicate/wrong tasks
+      console.error(`[TaskManager] ✗ Error creating task for log ${log.id}:`, taskError.message);
+      try {
+        await db.prepare(`UPDATE ai_logs SET task_created = 1 WHERE id = ?`).run(log.id);
+        console.log(`[TaskManager] Marked failed log ${log.id} as processed to prevent reprocessing`);
+      } catch (markError) {
+        console.error(`[TaskManager] ✗ Failed to mark log as processed:`, markError.message);
+      }
+    }
   }
 
   return created;
@@ -229,7 +245,7 @@ export async function processTaskWorkflow() {
 
   // Get active tasks that need processing (INTEGER: 0=false, 1=true)
   // IMPORTANT: Skip tasks that have already notified their action holder
-  // ALSO: Skip broken/hallucinated tasks (wifi, directions, taxi, Other bucket)
+  // NOTE: "Other" bucket is now VALID - these are requests without a predefined category
   const tasks = await db.prepare(`
     SELECT * FROM tasks 
     WHERE status != 'Completed' 
@@ -238,11 +254,6 @@ export async function processTaskWorkflow() {
     AND (action_holder_notified = 0 OR action_holder_notified IS NULL)
     AND task_bucket IS NOT NULL
     AND task_bucket != ''
-    AND task_bucket != 'Other'
-    AND LOWER(task_bucket) NOT LIKE '%wifi%'
-    AND LOWER(task_bucket) NOT LIKE '%wi-fi%'
-    AND LOWER(task_bucket) NOT LIKE '%direction%'
-    AND LOWER(task_bucket) NOT LIKE '%taxi%'
     ORDER BY created_at ASC
   `).all();
 
@@ -498,7 +509,7 @@ async function handleGuestPath(task, missingItems, lang) {
 /**
  * Handle Staff info request path
  */
-async function handleStaffPath(task, triageResult, lang) {
+async function handleStaffPath(task, triageResult, guestLang) {
   const db = getDb();
 
   if (!task.staff_phone) {
@@ -506,10 +517,21 @@ async function handleStaffPath(task, triageResult, lang) {
     return;
   }
 
+  // Get staff's preferred language from staff table
+  let staffLang = 'en'; // Default to English
+  if (task.staff_id) {
+    const staffRecord = await db.prepare('SELECT preferred_language FROM staff WHERE id = ?').get(task.staff_id);
+    if (staffRecord?.preferred_language) {
+      staffLang = staffRecord.preferred_language;
+    }
+  }
+  
+  console.log(`[TaskManager] Staff language: ${staffLang} (guest language: ${guestLang})`);
+
   const staffName = task.staff_name?.split(' ')[0] || 'there';
 
   const prompt = fillTemplate(PROMPT_STAFF_INFO_REQUEST, {
-    STAFF_LANG: lang,
+    STAFF_LANG: staffLang,
     STAFF_NAME: staffName,
     TASK_SCOPE: task.task_bucket || 'Task',
     STAFF_REQUIREMENTS: task.staff_requirements || '(none)',
@@ -790,11 +812,15 @@ async function evaluateRequirementsMet(task, threadContext) {
 /**
  * Use AI to determine if task is COMPLETED or SCHEDULED
  * This handles multiple languages and dynamic phrasing
+ * 
+ * KEY DISTINCTION:
+ * - COMPLETED = Request is RESOLVED (no further action needed by staff)
+ * - SCHEDULED = Staff will perform a PHYSICAL ACTION at a future time
  */
 async function evaluateTaskCompletionStatus(task, threadContext, staffMessage) {
-  const prompt = `You are evaluating a staff response to determine the task status.
+  const prompt = `You are evaluating a staff response to determine task status.
 
-TASK: ${task.task_bucket || task.action_title || 'Guest request'}
+TASK TYPE: ${task.task_bucket || task.action_title || 'Guest request'}
 
 STAFF'S LATEST MESSAGE:
 ${staffMessage}
@@ -802,13 +828,26 @@ ${staffMessage}
 THREAD CONTEXT:
 ${threadContext}
 
-Based on the staff's message, determine the status. The staff may write in ANY language.
+CRITICAL DISTINCTION - Use reasonable judgment:
 
-Return EXACTLY one of these words (no other text):
-- COMPLETED - if staff indicates the task is DONE/FINISHED/DELIVERED right now
-- SCHEDULED - if staff confirms a future time/schedule but hasn't done it yet
-- IN_PROGRESS - if staff acknowledges but hasn't confirmed completion or schedule
-- ESCALATED - if staff says they CANNOT complete the task (out of stock, unavailable, need approval, etc.)
+**COMPLETED** = The request is RESOLVED. Use for:
+- Approval/permission granted (e.g., "Yes you can check-in at 11am", "Early check-in is fine")
+- Information confirmed (e.g., "The code is 1234", "Yes that's available")
+- Physical task already done (e.g., "Towels delivered", "Pool cleaned", "Fixed it")
+- Simple confirmations that don't require future physical action
+
+**SCHEDULED** = Staff will perform a PHYSICAL ACTION later. Use ONLY for:
+- Delivery tasks with future time (e.g., "I'll bring towels at 9am tomorrow")
+- Maintenance scheduled (e.g., "Technician coming at 2pm")
+- Physical work to be done (e.g., "I'll clean the pool this afternoon")
+
+**IN_PROGRESS** = Staff acknowledged but hasn't confirmed resolution or schedule
+
+**ESCALATED** = Staff CANNOT complete the task (unavailable, need approval, etc.)
+
+The staff may write in ANY language. Apply common sense.
+
+Return EXACTLY one word: COMPLETED, SCHEDULED, IN_PROGRESS, or ESCALATED
 
 Answer:`;
 
