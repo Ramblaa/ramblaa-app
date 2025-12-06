@@ -323,28 +323,36 @@ router.get('/recurring', async (_req, res) => {
       ORDER BY t.created_at DESC
     `).all();
     
-    res.json(templates.map(t => ({
-      id: t.id,
-      propertyId: t.property_id,
-      propertyName: t.property_name,
-      title: t.task_request_title || t.task_bucket || 'Task',
-      description: t.guest_message || '',
-      taskBucket: t.task_bucket,
-      staffId: t.staff_id,
-      staffName: t.staff_name,
-      staffPhone: t.staff_phone,
-      repeatType: t.repeat_type || 'NONE',
-      intervalDays: t.interval_days || 1,
-      startDate: t.scheduled_at?.split('T')[0],
-      endDate: t.recurrence_end_date,
-      timeOfDay: t.time_of_day || '09:00',
-      maxOccurrences: t.max_occurrences,
-      occurrencesCreated: t.occurrences_created || 0,
-      nextRunAt: t.next_run_at,
-      lastRunAt: t.last_run_at,
-      isActive: t.status !== 'Cancelled',
-      createdAt: t.created_at,
-    })));
+    res.json(templates.map(t => {
+      // Convert Date objects to ISO strings for safe parsing
+      const scheduledAt = t.scheduled_at ? new Date(t.scheduled_at).toISOString() : null;
+      const nextRunAt = t.next_run_at ? new Date(t.next_run_at).toISOString() : null;
+      const lastRunAt = t.last_run_at ? new Date(t.last_run_at).toISOString() : null;
+      const createdAt = t.created_at ? new Date(t.created_at).toISOString() : null;
+      
+      return {
+        id: t.id,
+        propertyId: t.property_id,
+        propertyName: t.property_name,
+        title: t.task_request_title || t.task_bucket || 'Task',
+        description: t.guest_message || '',
+        taskBucket: t.task_bucket,
+        staffId: t.staff_id,
+        staffName: t.staff_name,
+        staffPhone: t.staff_phone,
+        repeatType: t.repeat_type || 'NONE',
+        intervalDays: t.interval_days || 1,
+        startDate: scheduledAt?.split('T')[0],
+        endDate: t.recurrence_end_date,
+        timeOfDay: t.time_of_day || '09:00',
+        maxOccurrences: t.max_occurrences,
+        occurrencesCreated: t.occurrences_created || 0,
+        nextRunAt,
+        lastRunAt,
+        isActive: t.status !== 'Cancelled',
+        createdAt,
+      };
+    }));
   } catch (error) {
     console.error('[Tasks] Recurring list error:', error);
     res.status(500).json({ error: error.message });
