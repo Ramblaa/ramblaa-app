@@ -126,6 +126,33 @@ export const tasksApi = {
   },
 
   /**
+   * Recurring tasks
+   */
+  async getRecurringTasks() {
+    return apiFetch('/tasks/recurring');
+  },
+
+  async createRecurringTask(data) {
+    return apiFetch('/tasks/recurring', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateRecurringTask(id, data) {
+    return apiFetch(`/tasks/recurring/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async deleteRecurringTask(id) {
+    return apiFetch(`/tasks/recurring/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  /**
    * Assign staff to task and trigger workflow
    */
   async assignTask(taskId, staffData) {

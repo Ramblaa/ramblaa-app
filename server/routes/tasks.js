@@ -14,6 +14,7 @@ import {
   evaluateTaskStatus,
   archiveCompletedTasks,
 } from '../services/taskManager.js';
+import { computeNextRunAt, createTaskFromRecurringTemplate } from '../services/recurringTaskProcessor.js';
 
 const router = Router();
 
@@ -74,6 +75,8 @@ router.get('/', async (req, res) => {
         propertyId: task.property_id,
         assignee: task.staff_name || 'Unassigned',
         assigneePhone: task.staff_phone,
+        recurringTaskId: task.recurring_task_id,
+        dueAt: task.due_at,
         dueDate: createdAt?.split('T')[0],
         dueTime: createdAt?.split('T')[1]?.slice(0, 5),
         status: formatStatus(task.status),
@@ -434,6 +437,185 @@ router.post('/', async (req, res) => {
     res.status(201).json(task);
   } catch (error) {
     console.error('[Tasks] Create error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Recurring tasks
+ */
+router.get('/recurring', async (_req, res) => {
+  try {
+    const db = getDb();
+    const templates = await db.prepare('SELECT * FROM recurring_tasks ORDER BY created_at DESC').all();
+    res.json(templates);
+  } catch (error) {
+    console.error('[Tasks] Recurring list error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/recurring', async (req, res) => {
+  try {
+    const db = getDb();
+    const {
+      propertyId,
+      bookingId,
+      phone,
+      title,
+      description,
+      taskBucket,
+      staffId,
+      staffName,
+      staffPhone,
+      repeatType,
+      intervalDays,
+      startDate,
+      endDate,
+      timeOfDay,
+      maxOccurrences,
+      createFirst = true,
+    } = req.body;
+
+    if (!propertyId || !title || !repeatType || !startDate) {
+      return res.status(400).json({ error: 'Missing required fields: propertyId, title, repeatType, startDate' });
+    }
+
+    const id = uuidv4();
+    const nextRunAt = computeNextRunAt(startDate, timeOfDay || '09:00', repeatType, intervalDays || 1);
+
+    await db.prepare(`
+      INSERT INTO recurring_tasks (
+        id, property_id, booking_id, phone, title, description, task_bucket,
+        staff_id, staff_name, staff_phone, repeat_type, interval_days,
+        start_date, end_date, time_of_day, max_occurrences,
+        occurrences_created, next_run_at, last_run_at, is_active, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, 1, CURRENT_TIMESTAMP)
+    `).run(
+      id,
+      propertyId,
+      bookingId || null,
+      phone || null,
+      title,
+      description || '',
+      taskBucket || 'Other',
+      staffId || null,
+      staffName || null,
+      staffPhone || null,
+      repeatType,
+      intervalDays || 1,
+      startDate,
+      endDate || null,
+      timeOfDay || '09:00',
+      maxOccurrences || null,
+      nextRunAt.toISOString()
+    );
+
+    // Optionally create the first occurrence immediately if startDate is now/past
+    if (createFirst && nextRunAt <= new Date()) {
+      await createTaskFromRecurringTemplate({
+        id,
+        property_id: propertyId,
+        booking_id: bookingId,
+        phone,
+        title,
+        description,
+        task_bucket: taskBucket,
+        staff_id: staffId,
+        staff_name: staffName,
+        staff_phone: staffPhone,
+        next_run_at: nextRunAt.toISOString(),
+      });
+
+      const nextNext = computeNextRunAt(
+        startDate,
+        timeOfDay || '09:00',
+        repeatType,
+        intervalDays || 1,
+        new Date(nextRunAt.getTime() + 1000)
+      );
+
+      await db.prepare(`
+        UPDATE recurring_tasks
+        SET occurrences_created = occurrences_created + 1,
+            last_run_at = ?,
+            next_run_at = ?
+        WHERE id = ?
+      `).run(
+        new Date().toISOString(),
+        nextNext.toISOString(),
+        id
+      );
+    }
+
+    const created = await db.prepare('SELECT * FROM recurring_tasks WHERE id = ?').get(id);
+    res.status(201).json(created);
+  } catch (error) {
+    console.error('[Tasks] Recurring create error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.patch('/recurring/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const db = getDb();
+
+    const existing = await db.prepare('SELECT * FROM recurring_tasks WHERE id = ?').get(id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Recurring task not found' });
+    }
+
+    const fields = [];
+    const params = [];
+
+    const updatable = [
+      'title','description','task_bucket','staff_id','staff_name','staff_phone',
+      'repeat_type','interval_days','start_date','end_date','time_of_day',
+      'max_occurrences','is_active'
+    ];
+    updatable.forEach(key => {
+      const bodyKey = key.replace(/_(.)/g, (_, c) => c.toUpperCase()); // snake to camel
+      if (updates[key] !== undefined) {
+        fields.push(`${key} = ?`);
+        params.push(updates[key]);
+      } else if (updates[bodyKey] !== undefined) {
+        fields.push(`${key} = ?`);
+        params.push(updates[bodyKey]);
+      }
+    });
+
+    if (updates.next_run_at || updates.nextRunAt) {
+      fields.push('next_run_at = ?');
+      params.push(updates.next_run_at || updates.nextRunAt);
+    }
+
+    if (fields.length === 0) {
+      return res.json(existing);
+    }
+
+    fields.push('updated_at = CURRENT_TIMESTAMP');
+    const sql = `UPDATE recurring_tasks SET ${fields.join(', ')} WHERE id = ?`;
+    params.push(id);
+    await db.prepare(sql).run(...params);
+
+    const updated = await db.prepare('SELECT * FROM recurring_tasks WHERE id = ?').get(id);
+    res.json(updated);
+  } catch (error) {
+    console.error('[Tasks] Recurring update error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/recurring/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = getDb();
+    await db.prepare('DELETE FROM recurring_tasks WHERE id = ?').run(id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[Tasks] Recurring delete error:', error);
     res.status(500).json({ error: error.message });
   }
 });

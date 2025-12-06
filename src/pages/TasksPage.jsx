@@ -8,6 +8,7 @@ import { Input } from '../components/ui/input'
 import { cn } from '../lib/utils'
 import { useNavigate } from 'react-router-dom'
 import { tasksApi, propertiesApi } from '../lib/api'
+import { format } from 'date-fns'
 
 const statusColors = {
   pending: 'warning',
@@ -39,6 +40,26 @@ export default function TasksPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const today = format(new Date(), 'yyyy-MM-dd')
+  const [newTask, setNewTask] = useState({
+    propertyId: '',
+    title: '',
+    taskBucket: '',
+    description: '',
+    staffName: '',
+    staffPhone: '',
+    bookingId: '',
+    phone: '',
+    repeatType: 'NONE', // NONE | DAILY | WEEKLY | MONTHLY | INTERVAL
+    intervalDays: 90,
+    startDate: today,
+    endDate: '',
+    timeOfDay: '09:00',
+    maxOccurrences: '',
+  })
 
   // Load tasks and properties on mount
   useEffect(() => {
@@ -57,6 +78,9 @@ export default function TasksPage() {
       
       setTasks(tasksData)
       setProperties(propertiesData)
+      if (!newTask.propertyId && propertiesData?.length) {
+        setNewTask(prev => ({ ...prev, propertyId: propertiesData[0].id }))
+      }
     } catch (err) {
       console.error('Failed to load data:', err)
       setError('Failed to load tasks')
@@ -69,6 +93,54 @@ export default function TasksPage() {
       ])
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSaveTask = async () => {
+    if (!newTask.propertyId || !newTask.title) {
+      alert('Please fill property and title')
+      return
+    }
+    setSaving(true)
+    try {
+      if (newTask.repeatType === 'NONE') {
+        await tasksApi.createTask({
+          propertyId: newTask.propertyId,
+          bookingId: newTask.bookingId || undefined,
+          phone: newTask.phone || undefined,
+          title: newTask.title,
+          description: newTask.description,
+          taskBucket: newTask.taskBucket || 'Other',
+          staffName: newTask.staffName || undefined,
+          staffPhone: newTask.staffPhone || undefined,
+        })
+      } else {
+        await tasksApi.createRecurringTask({
+          propertyId: newTask.propertyId,
+          bookingId: newTask.bookingId || undefined,
+          phone: newTask.phone || undefined,
+          title: newTask.title,
+          description: newTask.description,
+          taskBucket: newTask.taskBucket || 'Other',
+          staffName: newTask.staffName || undefined,
+          staffPhone: newTask.staffPhone || undefined,
+          repeatType: newTask.repeatType,
+          intervalDays: newTask.intervalDays || 90,
+          startDate: newTask.startDate,
+          endDate: newTask.endDate || null,
+          timeOfDay: newTask.timeOfDay || '09:00',
+          maxOccurrences: newTask.maxOccurrences || null,
+          createFirst: true,
+        })
+      }
+      setShowAddModal(false)
+      setNewTask(prev => ({ ...prev, title: '', description: '', taskBucket: '', repeatType: 'NONE' }))
+      loadData()
+    } catch (err) {
+      console.error('Add task failed', err)
+      alert(err.message || 'Failed to create task')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -147,7 +219,7 @@ export default function TasksPage() {
           <h1 className="text-2xl font-bold text-ink-900">Tasks</h1>
           <p className="text-ink-500">Manage cleaning, maintenance, and property tasks</p>
         </div>
-        <Button className="sm:w-auto" onClick={() => navigate('/tasks/new')}>
+        <Button className="sm:w-auto" onClick={() => setShowAddModal(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Add Task
         </Button>
@@ -291,6 +363,11 @@ export default function TasksPage() {
                         <Badge variant={priorityColors[task.priority] || 'secondary'}>
                           {task.priority} priority
                         </Badge>
+                    {task.recurringTaskId && (
+                      <Badge variant="secondary" className="bg-brand-100 text-brand-700">
+                        Recurring
+                      </Badge>
+                    )}
                       </div>
                       
                       <div className="flex gap-2">
@@ -329,6 +406,166 @@ export default function TasksPage() {
           <p className="text-ink-500">
             {searchTerm ? `No results for "${searchTerm}"` : 'Try adjusting your filters or create a new task.'}
           </p>
+        </div>
+      )}
+
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h2 className="text-xl font-semibold text-ink-900">Add Task</h2>
+                <p className="text-sm text-ink-500">One-off or recurring task</p>
+              </div>
+              <Button variant="ghost" onClick={() => setShowAddModal(false)}>Close</Button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-ink-800">Property *</label>
+                  <select
+                    value={newTask.propertyId}
+                    onChange={(e) => setNewTask(prev => ({ ...prev, propertyId: e.target.value }))}
+                    className="h-10 w-full rounded-md border border-ink-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-2"
+                  >
+                    {properties.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-ink-800">Category</label>
+                  <Input
+                    value={newTask.taskBucket}
+                    onChange={(e) => setNewTask(prev => ({ ...prev, taskBucket: e.target.value }))}
+                    placeholder="Cleaning, Maintenance, Other..."
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-ink-800">Title *</label>
+                <Input
+                  value={newTask.title}
+                  onChange={(e) => setNewTask(prev => ({ ...prev, title: e.target.value }))}
+                  placeholder="e.g., AC filter cleaning"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-ink-800">Description / Instructions</label>
+                <textarea
+                  value={newTask.description}
+                  onChange={(e) => setNewTask(prev => ({ ...prev, description: e.target.value }))}
+                  className="w-full h-24 px-3 py-2 border border-ink-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-2"
+                  placeholder="Describe what needs to be done..."
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-ink-800">Assign to (name)</label>
+                  <Input
+                    value={newTask.staffName}
+                    onChange={(e) => setNewTask(prev => ({ ...prev, staffName: e.target.value }))}
+                    placeholder="Optional staff name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-ink-800">Assignee phone</label>
+                  <Input
+                    value={newTask.staffPhone}
+                    onChange={(e) => setNewTask(prev => ({ ...prev, staffPhone: e.target.value }))}
+                    placeholder="+1..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-ink-800">Guest phone (optional)</label>
+                  <Input
+                    value={newTask.phone}
+                    onChange={(e) => setNewTask(prev => ({ ...prev, phone: e.target.value }))}
+                    placeholder="+1..."
+                  />
+                </div>
+              </div>
+
+              <div className="border rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold text-ink-900">Repeat</p>
+                    <p className="text-sm text-ink-500">Create recurring tasks automatically</p>
+                  </div>
+                  <select
+                    value={newTask.repeatType}
+                    onChange={(e) => setNewTask(prev => ({ ...prev, repeatType: e.target.value }))}
+                    className="h-10 rounded-md border border-ink-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-2"
+                  >
+                    <option value="NONE">None (one-off)</option>
+                    <option value="DAILY">Daily</option>
+                    <option value="WEEKLY">Weekly</option>
+                    <option value="MONTHLY">Monthly</option>
+                    <option value="INTERVAL">Every N days</option>
+                  </select>
+                </div>
+
+                {newTask.repeatType !== 'NONE' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-ink-800">Start date</label>
+                      <Input
+                        type="date"
+                        value={newTask.startDate}
+                        onChange={(e) => setNewTask(prev => ({ ...prev, startDate: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-ink-800">Time of day</label>
+                      <Input
+                        type="time"
+                        value={newTask.timeOfDay}
+                        onChange={(e) => setNewTask(prev => ({ ...prev, timeOfDay: e.target.value }))}
+                      />
+                    </div>
+                    {newTask.repeatType === 'INTERVAL' && (
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-ink-800">Every N days</label>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={newTask.intervalDays}
+                          onChange={(e) => setNewTask(prev => ({ ...prev, intervalDays: Number(e.target.value || 1) }))}
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-ink-800">End date (optional)</label>
+                      <Input
+                        type="date"
+                        value={newTask.endDate}
+                        onChange={(e) => setNewTask(prev => ({ ...prev, endDate: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-ink-800">Max occurrences (optional)</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={newTask.maxOccurrences}
+                        onChange={(e) => setNewTask(prev => ({ ...prev, maxOccurrences: e.target.value }))}
+                        placeholder="e.g., 10"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t bg-ink-50 flex items-center justify-end gap-3">
+              <Button variant="ghost" onClick={() => setShowAddModal(false)}>Cancel</Button>
+              <Button onClick={handleSaveTask} disabled={saving}>
+                {saving ? 'Saving...' : 'Save Task'}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

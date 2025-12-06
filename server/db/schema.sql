@@ -235,13 +235,43 @@ CREATE TABLE IF NOT EXISTS tasks (
   message_chain_ids TEXT,
   ongoing_conversation TEXT,
   priority TEXT DEFAULT 'medium',  -- low, medium, high, urgent
+  recurring_task_id TEXT,
   scheduled_at TIMESTAMP,
+  due_at TIMESTAMP,
   completed_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (property_id) REFERENCES properties(id),
   FOREIGN KEY (booking_id) REFERENCES bookings(id),
   FOREIGN KEY (staff_id) REFERENCES staff(id)
+);
+
+-- Recurring task templates
+CREATE TABLE IF NOT EXISTS recurring_tasks (
+  id TEXT PRIMARY KEY,
+  property_id TEXT NOT NULL,
+  booking_id TEXT,
+  phone TEXT,
+  title TEXT NOT NULL,
+  description TEXT,
+  task_bucket TEXT,
+  staff_id TEXT,
+  staff_name TEXT,
+  staff_phone TEXT,
+  repeat_type TEXT NOT NULL,              -- DAILY | WEEKLY | MONTHLY | INTERVAL
+  interval_days INTEGER,                  -- used when repeat_type = INTERVAL
+  start_date DATE NOT NULL,
+  end_date DATE,
+  time_of_day TEXT,                       -- HH:mm
+  max_occurrences INTEGER,
+  occurrences_created INTEGER DEFAULT 0,
+  next_run_at TIMESTAMP,
+  last_run_at TIMESTAMP,
+  is_active BOOLEAN DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (property_id) REFERENCES properties(id),
+  FOREIGN KEY (booking_id) REFERENCES bookings(id)
 );
 
 -- Task archive (from d:taskLog)
