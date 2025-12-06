@@ -35,6 +35,7 @@ export default function TasksPage() {
   const navigate = useNavigate()
   const [tasks, setTasks] = useState([])
   const [properties, setProperties] = useState([])
+  const [propertyDetails, setPropertyDetails] = useState(null) // includes taskDefinitions, staff
   const [filter, setFilter] = useState('all')
   const [propertyFilter, setPropertyFilter] = useState('all')
   const [searchTerm, setSearchTerm] = useState('')
@@ -46,9 +47,11 @@ export default function TasksPage() {
   const today = format(new Date(), 'yyyy-MM-dd')
   const [newTask, setNewTask] = useState({
     propertyId: '',
+    taskDefinitionId: '',
     title: '',
     taskBucket: '',
     description: '',
+    staffId: '',
     staffName: '',
     staffPhone: '',
     bookingId: '',
@@ -79,7 +82,11 @@ export default function TasksPage() {
       setTasks(tasksData)
       setProperties(propertiesData)
       if (!newTask.propertyId && propertiesData?.length) {
-        setNewTask(prev => ({ ...prev, propertyId: propertiesData[0].id }))
+        const firstId = propertiesData[0].id
+        setNewTask(prev => ({ ...prev, propertyId: firstId }))
+        await loadPropertyDetails(firstId)
+      } else if (newTask.propertyId) {
+        await loadPropertyDetails(newTask.propertyId)
       }
     } catch (err) {
       console.error('Failed to load data:', err)
@@ -97,8 +104,8 @@ export default function TasksPage() {
   }
 
   const handleSaveTask = async () => {
-    if (!newTask.propertyId || !newTask.title) {
-      alert('Please fill property and title')
+      if (!newTask.propertyId || !newTask.title || !newTask.taskDefinitionId || !newTask.staffId) {
+        alert('Please fill property, task definition, staff, and title')
       return
     }
     setSaving(true)
@@ -111,6 +118,7 @@ export default function TasksPage() {
           title: newTask.title,
           description: newTask.description,
           taskBucket: newTask.taskBucket || 'Other',
+          staffId: newTask.staffId,
           staffName: newTask.staffName || undefined,
           staffPhone: newTask.staffPhone || undefined,
         })
@@ -122,6 +130,7 @@ export default function TasksPage() {
           title: newTask.title,
           description: newTask.description,
           taskBucket: newTask.taskBucket || 'Other',
+          staffId: newTask.staffId,
           staffName: newTask.staffName || undefined,
           staffPhone: newTask.staffPhone || undefined,
           repeatType: newTask.repeatType,
@@ -141,6 +150,17 @@ export default function TasksPage() {
       alert(err.message || 'Failed to create task')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const loadPropertyDetails = async (propertyId) => {
+    if (!propertyId) return
+    try {
+      const details = await propertiesApi.getProperty(propertyId)
+      setPropertyDetails(details)
+    } catch (err) {
+      console.error('Failed to load property details', err)
+      setPropertyDetails(null)
     }
   }
 
@@ -433,6 +453,32 @@ export default function TasksPage() {
                     ))}
                   </select>
                 </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-ink-800">Task Definition *</label>
+                    <select
+                      value={newTask.taskDefinitionId}
+                      onChange={(e) => {
+                        const selectedId = e.target.value
+                        const def = propertyDetails?.taskDefinitions?.find((d) => String(d.id) === String(selectedId))
+                        setNewTask(prev => ({
+                          ...prev,
+                          taskDefinitionId: selectedId,
+                          taskBucket: def?.subCategory || prev.taskBucket,
+                          description: def ? (prev.description || def.staffRequirements || def.guestRequirements || '') : prev.description,
+                        }))
+                      }}
+                      className="h-10 w-full rounded-md border border-ink-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-2"
+                    >
+                      <option value="">Select definition</option>
+                      {propertyDetails?.taskDefinitions?.map((d) => (
+                        <option key={d.id} value={d.id}>{d.subCategory}</option>
+                      ))}
+                    </select>
+                    {!propertyDetails?.taskDefinitions?.length && (
+                      <p className="text-xs text-amber-600">No task definitions. Add in Resources.</p>
+                    )}
+                  </div>
+
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-ink-800">Category</label>
                   <Input
@@ -464,20 +510,29 @@ export default function TasksPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-ink-800">Assign to (name)</label>
-                  <Input
-                    value={newTask.staffName}
-                    onChange={(e) => setNewTask(prev => ({ ...prev, staffName: e.target.value }))}
-                    placeholder="Optional staff name"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-ink-800">Assignee phone</label>
-                  <Input
-                    value={newTask.staffPhone}
-                    onChange={(e) => setNewTask(prev => ({ ...prev, staffPhone: e.target.value }))}
-                    placeholder="+1..."
-                  />
+                  <label className="text-sm font-medium text-ink-800">Staff *</label>
+                  <select
+                    value={newTask.staffId}
+                    onChange={(e) => {
+                      const selectedId = e.target.value
+                      const staff = propertyDetails?.staff?.find((s) => String(s.id) === String(selectedId))
+                      setNewTask(prev => ({
+                        ...prev,
+                        staffId: selectedId,
+                        staffName: staff?.name || '',
+                        staffPhone: staff?.phone || '',
+                      }))
+                    }}
+                    className="h-10 w-full rounded-md border border-ink-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-2"
+                  >
+                    <option value="">Select staff</option>
+                    {propertyDetails?.staff?.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name} {s.role ? `(${s.role})` : ''}</option>
+                    ))}
+                  </select>
+                  {!propertyDetails?.staff?.length && (
+                    <p className="text-xs text-amber-600">No staff for this property. Add staff first.</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-ink-800">Guest phone (optional)</label>
